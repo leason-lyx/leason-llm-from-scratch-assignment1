@@ -1,8 +1,9 @@
 import os
-from typing import BinaryIO
+from typing import BinaryIO, Iterable, Iterator
 import multiprocessing
 import regex as re
 from collections import defaultdict
+import pickle
 
 
 def find_chunk_boundaries(
@@ -58,15 +59,17 @@ def pretokenize_chunk(
     chunk: str,
     special_tokens: list[str],
     rx: re.Pattern,
-) -> dict[tuple[bytes, ...], int]:
+) -> list[tuple[bytes, ...]]:
     """
-    Pretokenize a text chunk into byte tuples and count their frequencies.
-    Special tokens are removed before pretokenization.
+    Pretokenize a text chunk into list of byte tuples.
     """
-    frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
+    pretokens: list[tuple[bytes, ...]] = []
     # Removing special tokens before pre-tokenization
-    pattern: str = "|".join(re.escape(tok) for tok in special_tokens)
-    texts: list[str] = re.split(pattern, chunk)
+    if special_tokens:
+        pattern: str = "|".join(re.escape(tok) for tok in special_tokens)
+        texts: list[str] = re.split(pattern, chunk)
+    else:
+        texts = [chunk]
     for text in texts:
         # do pre-tokenization
         for m in rx.finditer(text):
@@ -74,8 +77,138 @@ def pretokenize_chunk(
             byte_tuple: tuple[bytes, ...] = tuple(
                 word[i : i + 1] for i in range(len(word))
             )
-            frequency_table[byte_tuple] += 1
+            pretokens.append(byte_tuple)
+    return pretokens
+
+
+def split_by_special_tokens(
+    text: str, special_tokens: list[str]
+) -> list[tuple[str, bool]]:
+    if not special_tokens or not text:
+        return [(text, False)] if text else []
+
+    ordered_tokens = sorted(special_tokens, key=len, reverse=True)
+    pattern: str = "|".join(re.escape(tok) for tok in ordered_tokens)
+    rx = re.compile(pattern)
+
+    segments: list[tuple[str, bool]] = []
+    last_end = 0
+    for match in rx.finditer(text):
+        if match.start() > last_end:
+            segments.append((text[last_end : match.start()], False))
+        segments.append((match.group(0), True))
+        last_end = match.end()
+    if last_end < len(text):
+        segments.append((text[last_end:], False))
+    return segments
+
+
+def get_frequency_table(
+    chunk: str, special_tokens: list[str], rx: re.Pattern
+) -> dict[tuple[bytes, ...], int]:
+    """
+    Get frequency table of byte tuples from a text chunk.
+    """
+    frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
+    pretokens: list[tuple[bytes, ...]] = pretokenize_chunk(chunk, special_tokens, rx)
+    for byte_tuple in pretokens:
+        frequency_table[byte_tuple] += 1
     return frequency_table
+
+
+def merge(
+    byte_tuple: tuple[bytes, ...], merge_pair: tuple[bytes, bytes], merge_token: bytes
+) -> tuple[bytes, ...]:
+    i = 0
+    new_byte_tuple: list[bytes] = []
+    while i < len(byte_tuple):
+        if (
+            i < len(byte_tuple) - 1
+            and byte_tuple[i] == merge_pair[0]
+            and byte_tuple[i + 1] == merge_pair[1]
+        ):
+            new_byte_tuple.append(merge_token)
+            i += 2
+        else:
+            new_byte_tuple.append(byte_tuple[i])
+            i += 1
+    return tuple(new_byte_tuple)
+
+
+class BpeTokenizer:
+
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
+        self.vocab = vocab
+        self.merges = merges
+        self.special_tokens = special_tokens if special_tokens is not None else []
+
+        # appending special_tokens to the vocabulary if they aren’t already there
+        if self.special_tokens is not None:
+            for special_token in self.special_tokens:
+                token_bytes = special_token.encode("utf-8")
+                if token_bytes not in self.vocab.values():
+                    self.vocab[len(self.vocab)] = token_bytes
+
+        # map from bytes to token IDs for encoding
+        self.byte_to_id: dict[bytes, int] = {v: k for k, v in self.vocab.items()}
+
+    @classmethod
+    def from_files(
+        cls,
+        vocab_filepath: str,
+        merges_filepath: str,
+        special_tokens: list[str] | None = None,
+    ):
+        """
+        Class method that constructs and return a Tokenizer from a serialized vocabulary
+        and list of merges (in the same format that your BPE training code output)
+        and (optionally) a list of specialtokens
+        """
+        with open(vocab_filepath, "rb") as vf:
+            vocab = pickle.load(vf)
+        with open(merges_filepath, "rb") as mf:
+            merges = pickle.load(mf)
+        return cls(vocab, merges, special_tokens)
+
+    def encode(self, text: str) -> list[int]:
+        # step1: pre-tokenization
+        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        rx = re.compile(PAT)
+        tokens: list[int] = []
+
+        segments = split_by_special_tokens(text, self.special_tokens)
+        for segment, is_special in segments:
+            if is_special:
+                token_bytes = segment.encode("utf-8")
+                tokens.append(self.byte_to_id[token_bytes])
+                continue
+
+            pretokens: list[tuple[bytes, ...]] = pretokenize_chunk(segment, [], rx)
+            # step2: apply BPE merges
+            for pretoken in pretokens:
+                for merge_pair in self.merges:
+                    pretoken = merge(
+                        pretoken, merge_pair, merge_pair[0] + merge_pair[1]
+                    )
+                for byte in pretoken:
+                    token_id = self.byte_to_id[byte]
+                    tokens.append(token_id)
+        return tokens
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for text in iterable:
+            for token_id in self.encode(text):
+                yield token_id
+
+    def decode(self, ids: list[int]) -> str:
+        bytes_list: list[bytes] = [self.vocab[token_id] for token_id in ids]
+        decoded_text: str = b"".join(bytes_list).decode("utf-8", errors="replace")
+        return decoded_text
 
 
 def train_bpe(
@@ -91,7 +224,7 @@ def train_bpe(
         initial byte vocabulary, vocabulary items produced from merging, and any special tokens).
         special_tokens: list[str] A list of strings to add to the vocabulary. These special tokens do not
         otherwise affect BPE training.
-        num_processes: int Number of chunking
+        num_processes: int Number of processes to use for chunking and pretokenization.
 
     return:
         vocab: dict[int, bytes] The tokenizer vocabulary, a mapping from int (token ID in the vocabulary) to bytes (token bytes).
@@ -116,7 +249,7 @@ def train_bpe(
     rx = re.compile(PAT)
     with multiprocessing.Pool(processes=num_processes) as pool:
         results = pool.starmap(
-            pretokenize_chunk,
+            get_frequency_table,
             [(chunk, special_tokens, rx) for chunk in chunks],
         )
     for sub_frequency_table in results:
@@ -154,33 +287,21 @@ def train_bpe(
         # update frequency table
         new_frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
         for byte_tuple, freq in frequency_table.items():
-            i = 0
-            new_byte_tuple: list[bytes] = []
-            while i < len(byte_tuple):
-                if (
-                    i < len(byte_tuple) - 1
-                    and byte_tuple[i] == most_frequent_pair[0]
-                    and byte_tuple[i + 1] == most_frequent_pair[1]
-                ):
-                    new_byte_tuple.append(new_token)
-                    i += 2
-                else:
-                    new_byte_tuple.append(byte_tuple[i])
-                    i += 1
-            new_frequency_table[tuple(new_byte_tuple)] += freq
+            new_byte_tuple = merge(byte_tuple, most_frequent_pair, new_token)
+            # i = 0
+            # new_byte_tuple: list[bytes] = []
+            # while i < len(byte_tuple):
+            #     if (
+            #         i < len(byte_tuple) - 1
+            #         and byte_tuple[i] == most_frequent_pair[0]
+            #         and byte_tuple[i + 1] == most_frequent_pair[1]
+            #     ):
+            #         new_byte_tuple.append(new_token)
+            #         i += 2
+            #     else:
+            #         new_byte_tuple.append(byte_tuple[i])
+            #         i += 1
+            new_frequency_table[new_byte_tuple] += freq
         frequency_table = new_frequency_table
 
     return vocab, merges
-
-
-if __name__ == "__main__":
-    input_path = "data/sample.txt"
-    vocab_size = 1 + 256 + 6
-    special_tokens = ["<|endoftext|>"]
-    vocab, merges = train_bpe(input_path, vocab_size, special_tokens, num_processes=1)
-    print("Vocabulary:")
-    for idx, token in vocab.items():
-        print(f"{idx}: {token}")
-    print("\nMerges:")
-    for merge in merges:
-        print(merge)
