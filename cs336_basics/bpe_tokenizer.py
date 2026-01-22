@@ -282,6 +282,7 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
     num_processes: int = 8,
+    save_dir: str | os.PathLike | None = None,
 ):
     """
     parameters:
@@ -414,5 +415,14 @@ def train_bpe(
             pairs = token_pairs_cache[byte_tuple]
             for pair in set(pairs):
                 pair_to_tokens[pair].add(byte_tuple)
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        vocab_path = os.path.join(save_dir, "vocab.pkl")
+        merges_path = os.path.join(save_dir, "merges.pkl")
+        with open(vocab_path, "wb") as vf:
+            pickle.dump(vocab, vf)
+        with open(merges_path, "wb") as mf:
+            pickle.dump(merges, mf)
 
     return vocab, merges
