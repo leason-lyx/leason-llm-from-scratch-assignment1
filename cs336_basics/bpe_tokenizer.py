@@ -6,6 +6,11 @@ from collections import defaultdict
 import pickle
 
 
+PRETOKEN_PATTERN = (
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+)
+
+
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
@@ -135,6 +140,12 @@ def merge(
     return tuple(new_byte_tuple)
 
 
+def get_pairs(
+    byte_tuple: tuple[bytes, ...],
+) -> tuple[tuple[bytes, bytes], ...]:
+    return tuple((byte_tuple[i], byte_tuple[i + 1]) for i in range(len(byte_tuple) - 1))
+
+
 class BpeTokenizer:
 
     def __init__(
@@ -156,6 +167,19 @@ class BpeTokenizer:
 
         # map from bytes to token IDs for encoding
         self.byte_to_id: dict[bytes, int] = {v: k for k, v in self.vocab.items()}
+        self._special_token_to_id: dict[str, int] = {
+            tok: self.byte_to_id[tok.encode("utf-8")] for tok in self.special_tokens
+        }
+        self._pretok_rx = re.compile(PRETOKEN_PATTERN)
+        self._special_token_rx: re.Pattern | None = None
+        if self.special_tokens:
+            ordered_tokens = sorted(self.special_tokens, key=len, reverse=True)
+            pattern = "|".join(re.escape(tok) for tok in ordered_tokens)
+            self._special_token_rx = re.compile(pattern)
+        self._merge_ranks: dict[tuple[bytes, bytes], int] = {
+            pair: i for i, pair in enumerate(self.merges)
+        }
+        self._token_id_cache: dict[tuple[bytes, ...], tuple[int, ...]] = {}
 
     @classmethod
     def from_files(
@@ -175,29 +199,69 @@ class BpeTokenizer:
             merges = pickle.load(mf)
         return cls(vocab, merges, special_tokens)
 
+    def _split_special_tokens(self, text: str) -> list[tuple[str, bool]]:
+        if not self._special_token_rx or not text:
+            return [(text, False)] if text else []
+
+        segments: list[tuple[str, bool]] = []
+        last_end = 0
+        for match in self._special_token_rx.finditer(text):
+            if match.start() > last_end:
+                segments.append((text[last_end : match.start()], False))
+            segments.append((match.group(0), True))
+            last_end = match.end()
+        if last_end < len(text):
+            segments.append((text[last_end:], False))
+        return segments
+
+    def _apply_bpe(self, token: tuple[bytes, ...]) -> tuple[bytes, ...]:
+        if len(token) < 2 or not self._merge_ranks:
+            return token
+        pairs = get_pairs(token)
+        if not pairs:
+            return token
+
+        merge_ranks = self._merge_ranks
+        while True:
+            best_pair: tuple[bytes, bytes] | None = None
+            best_rank: int | None = None
+            for pair in pairs:
+                rank = merge_ranks.get(pair)
+                if rank is None:
+                    continue
+                if best_rank is None or rank < best_rank:
+                    best_rank = rank
+                    best_pair = pair
+            if best_pair is None:
+                break
+            token = merge(token, best_pair, best_pair[0] + best_pair[1])
+            if len(token) < 2:
+                break
+            pairs = get_pairs(token)
+        return token
+
     def encode(self, text: str) -> list[int]:
-        # step1: pre-tokenization
-        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        rx = re.compile(PAT)
         tokens: list[int] = []
 
-        segments = split_by_special_tokens(text, self.special_tokens)
+        segments = self._split_special_tokens(text)
+        token_cache = self._token_id_cache
+        pretoken_rx = self._pretok_rx
+        byte_to_id = self.byte_to_id
         for segment, is_special in segments:
             if is_special:
-                token_bytes = segment.encode("utf-8")
-                tokens.append(self.byte_to_id[token_bytes])
+                tokens.append(self._special_token_to_id[segment])
                 continue
 
-            pretokens: list[tuple[bytes, ...]] = pretokenize_chunk(segment, [], rx)
-            # step2: apply BPE merges
+            pretokens: list[tuple[bytes, ...]] = pretokenize_chunk(
+                segment, [], pretoken_rx
+            )
             for pretoken in pretokens:
-                for merge_pair in self.merges:
-                    pretoken = merge(
-                        pretoken, merge_pair, merge_pair[0] + merge_pair[1]
-                    )
-                for byte in pretoken:
-                    token_id = self.byte_to_id[byte]
-                    tokens.append(token_id)
+                cached_ids = token_cache.get(pretoken)
+                if cached_ids is None:
+                    merged = self._apply_bpe(pretoken)
+                    cached_ids = tuple(byte_to_id[byte] for byte in merged)
+                    token_cache[pretoken] = cached_ids
+                tokens.extend(cached_ids)
         return tokens
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
@@ -206,8 +270,10 @@ class BpeTokenizer:
                 yield token_id
 
     def decode(self, ids: list[int]) -> str:
-        bytes_list: list[bytes] = [self.vocab[token_id] for token_id in ids]
-        decoded_text: str = b"".join(bytes_list).decode("utf-8", errors="replace")
+        vocab = self.vocab
+        decoded_text: str = b"".join(vocab[token_id] for token_id in ids).decode(
+            "utf-8", errors="replace"
+        )
         return decoded_text
 
 
@@ -245,8 +311,7 @@ def train_bpe(
 
     # pretokenization
     frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    rx = re.compile(PAT)
+    rx = re.compile(PRETOKEN_PATTERN)
     with multiprocessing.Pool(processes=num_processes) as pool:
         results = pool.starmap(
             get_frequency_table,
@@ -265,43 +330,89 @@ def train_bpe(
         idx: int = len(vocab)
         vocab[idx] = bytes([i])
     # merging
-    merges: list[tuple[bytes, bytes]] = []
-    while len(vocab) < vocab_size:
-        # count byte pairs
-        bytepair_counts: dict[tuple[bytes, bytes], int] = defaultdict(int)
-        for byte_tuple, freq in frequency_table.items():
-            for i in range(len(byte_tuple) - 1):
-                pair: tuple[bytes, bytes] = (byte_tuple[i], byte_tuple[i + 1])
-                bytepair_counts[pair] += freq
+    merges: list[tuple[bytes, bytes]] = []  # list of merges performed
+    pair_counts: dict[tuple[bytes, bytes], int] = defaultdict(
+        int
+    )  # frequency of each byte pair
+    pair_to_tokens: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = defaultdict(
+        set
+    )  # tokens containing each byte pair
+    token_pairs_cache: dict[tuple[bytes, ...], tuple[tuple[bytes, bytes], ...]] = (
+        {}
+    )  # cache of token to its byte pairs
 
-        if not bytepair_counts:
-            break
+    for byte_tuple, freq in frequency_table.items():
+        pairs = token_pairs_cache.setdefault(byte_tuple, get_pairs(byte_tuple))
+        for pair in pairs:
+            pair_counts[pair] += freq
+            pair_to_tokens[pair].add(byte_tuple)
+
+    while len(vocab) < vocab_size and pair_counts:
         # find the most frequent byte pair
         most_frequent_pair: tuple[bytes, bytes] = max(
-            bytepair_counts.items(), key=lambda kv: (kv[1], kv[0])
+            pair_counts.items(), key=lambda kv: (kv[1], kv[0])
         )[0]
+
         # create new vocabulary entry
         merges.append(most_frequent_pair)
         new_token: bytes = most_frequent_pair[0] + most_frequent_pair[1]
         vocab[len(vocab)] = new_token
-        # update frequency table
-        new_frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
-        for byte_tuple, freq in frequency_table.items():
+
+        # update frequency table and pair counts
+        delta_freq: dict[tuple[bytes, ...], int] = defaultdict(int)
+        affected_tokens = list(pair_to_tokens.get(most_frequent_pair, []))
+        for byte_tuple in affected_tokens:
+            freq = frequency_table.get(byte_tuple, 0)
+            old_pairs = token_pairs_cache[byte_tuple]
+            # subtract old pair counts
+            for pair in old_pairs:
+                new_count = pair_counts.get(pair, 0) - freq
+                if new_count <= 0:
+                    pair_counts.pop(pair, None)
+                else:
+                    pair_counts[pair] = new_count
+
             new_byte_tuple = merge(byte_tuple, most_frequent_pair, new_token)
-            # i = 0
-            # new_byte_tuple: list[bytes] = []
-            # while i < len(byte_tuple):
-            #     if (
-            #         i < len(byte_tuple) - 1
-            #         and byte_tuple[i] == most_frequent_pair[0]
-            #         and byte_tuple[i + 1] == most_frequent_pair[1]
-            #     ):
-            #         new_byte_tuple.append(new_token)
-            #         i += 2
-            #     else:
-            #         new_byte_tuple.append(byte_tuple[i])
-            #         i += 1
-            new_frequency_table[new_byte_tuple] += freq
-        frequency_table = new_frequency_table
+            # update delta frequencies
+            delta_freq[byte_tuple] -= freq
+            delta_freq[new_byte_tuple] += freq
+
+            new_pairs = token_pairs_cache.get(new_byte_tuple)
+            # add new pair counts
+            if new_pairs is None:
+                new_pairs = get_pairs(new_byte_tuple)
+                token_pairs_cache[new_byte_tuple] = new_pairs
+            for pair in new_pairs:
+                pair_counts[pair] = pair_counts.get(pair, 0) + freq
+
+        tokens_to_add: list[tuple[bytes, ...]] = []
+        tokens_to_remove: list[tuple[bytes, ...]] = []
+        # apply delta frequencies to frequency table
+        for byte_tuple, delta in delta_freq.items():
+            old_freq = frequency_table.get(byte_tuple, 0)
+            new_freq = old_freq + delta
+            if new_freq <= 0:
+                if old_freq > 0:
+                    tokens_to_remove.append(byte_tuple)
+                frequency_table.pop(byte_tuple, None)
+            else:
+                if old_freq <= 0:
+                    tokens_to_add.append(byte_tuple)
+                frequency_table[byte_tuple] = new_freq
+
+        # update pair_to_tokens mapping
+        for byte_tuple in tokens_to_remove:
+            pairs = token_pairs_cache[byte_tuple]
+            for pair in set(pairs):
+                token_set = pair_to_tokens.get(pair)
+                if not token_set:
+                    continue
+                token_set.discard(byte_tuple)
+                if not token_set:
+                    pair_to_tokens.pop(pair, None)
+        for byte_tuple in tokens_to_add:
+            pairs = token_pairs_cache[byte_tuple]
+            for pair in set(pairs):
+                pair_to_tokens[pair].add(byte_tuple)
 
     return vocab, merges
