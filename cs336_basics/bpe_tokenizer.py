@@ -4,6 +4,8 @@ import multiprocessing
 import regex as re
 from collections import defaultdict
 import pickle
+from loguru import logger
+import time
 
 
 PRETOKEN_PATTERN = (
@@ -86,28 +88,6 @@ def pretokenize_chunk(
     return pretokens
 
 
-def split_by_special_tokens(
-    text: str, special_tokens: list[str]
-) -> list[tuple[str, bool]]:
-    if not special_tokens or not text:
-        return [(text, False)] if text else []
-
-    ordered_tokens = sorted(special_tokens, key=len, reverse=True)
-    pattern: str = "|".join(re.escape(tok) for tok in ordered_tokens)
-    rx = re.compile(pattern)
-
-    segments: list[tuple[str, bool]] = []
-    last_end = 0
-    for match in rx.finditer(text):
-        if match.start() > last_end:
-            segments.append((text[last_end : match.start()], False))
-        segments.append((match.group(0), True))
-        last_end = match.end()
-    if last_end < len(text):
-        segments.append((text[last_end:], False))
-    return segments
-
-
 def get_frequency_table(
     chunk: str, special_tokens: list[str], rx: re.Pattern
 ) -> dict[tuple[bytes, ...], int]:
@@ -147,7 +127,6 @@ def get_pairs(
 
 
 class BpeTokenizer:
-
     def __init__(
         self,
         vocab: dict[int, bytes],
@@ -299,6 +278,13 @@ def train_bpe(
         is a tuple of bytes (<token1>, <token2>), representing that <token1> was merged with
         <token2>. The merges should be ordered by order of creation.
     """
+    start_time = time.time()
+    logger.info("Starting BPE training")
+    logger.info(f"Input path: {input_path}")
+    logger.info(f"Vocabulary size: {vocab_size}")
+    logger.info(f"Number of processes: {num_processes}")
+    if save_dir is not None:
+        logger.info(f"Saving vocabulary and merges to directory: {save_dir}")
 
     # read and chunk the text
     chunks: list[str] = []
@@ -417,6 +403,7 @@ def train_bpe(
                 pair_to_tokens[pair].add(byte_tuple)
 
     if save_dir is not None:
+        logger.info(f"Saving vocabulary and merges to directory: {save_dir}")
         os.makedirs(save_dir, exist_ok=True)
         vocab_path = os.path.join(save_dir, "vocab.pkl")
         merges_path = os.path.join(save_dir, "merges.pkl")
@@ -424,5 +411,8 @@ def train_bpe(
             pickle.dump(vocab, vf)
         with open(merges_path, "wb") as mf:
             pickle.dump(merges, mf)
+
+    elapsed_time = time.time() - start_time
+    logger.info(f"BPE training completed in {elapsed_time:.2f} seconds")
 
     return vocab, merges
