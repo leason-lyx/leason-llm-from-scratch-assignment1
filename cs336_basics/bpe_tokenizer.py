@@ -455,7 +455,7 @@ if __name__ == "__main__":
     vocab_size = 10000
     special_tokens = ["<|endoftext|>"]
     num_processes = 8
-    save_dir = "bpe_tokenizer_output"
+    save_dir = "tinystories_tokenizer"
     vocab, merges = train_bpe(
         input_path=input_path,
         vocab_size=vocab_size,
