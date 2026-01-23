@@ -166,3 +166,5 @@ data/
 .DS_Store
 test_results.xml
 make_submission.sh
+scalene-profile.html
+scalene-profile.json

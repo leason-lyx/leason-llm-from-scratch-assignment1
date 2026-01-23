@@ -20,6 +20,7 @@ dependencies = [
     "wandb>=0.19.7",
     "ty>=0.0.1a16",
     "loguru>=0.7.3",
+    "scalene>=2.0.1",
 ]
 
 [[tool.uv.index]]
