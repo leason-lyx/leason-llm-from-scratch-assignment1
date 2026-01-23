@@ -21,6 +21,7 @@ dependencies = [
     "ty>=0.0.1a16",
     "loguru>=0.7.3",
     "scalene>=2.0.1",
+    "rich>=14.2.0",
 ]
 
 [[tool.uv.index]]

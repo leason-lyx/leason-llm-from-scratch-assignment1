@@ -6,6 +6,7 @@ from collections import defaultdict
 import pickle
 from loguru import logger
 import time
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn
 
 
 PRETOKEN_PATTERN = (
@@ -334,73 +335,91 @@ def train_bpe(
             pair_counts[pair] += freq
             pair_to_tokens[pair].add(byte_tuple)
 
-    while len(vocab) < vocab_size and pair_counts:
-        # find the most frequent byte pair
-        most_frequent_pair: tuple[bytes, bytes] = max(
-            pair_counts.items(), key=lambda kv: (kv[1], kv[0])
-        )[0]
+    # Calculate total merges needed
+    initial_vocab_size = len(vocab)
+    total_merges = vocab_size - initial_vocab_size
 
-        # create new vocabulary entry
-        merges.append(most_frequent_pair)
-        new_token: bytes = most_frequent_pair[0] + most_frequent_pair[1]
-        vocab[len(vocab)] = new_token
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+    ) as progress:
+        merge_task = progress.add_task(
+            "[cyan]Training BPE tokenizer...", total=total_merges
+        )
 
-        # update frequency table and pair counts
-        delta_freq: dict[tuple[bytes, ...], int] = defaultdict(int)
-        affected_tokens = list(pair_to_tokens.get(most_frequent_pair, []))
-        for byte_tuple in affected_tokens:
-            freq = frequency_table.get(byte_tuple, 0)
-            old_pairs = token_pairs_cache[byte_tuple]
-            # subtract old pair counts
-            for pair in old_pairs:
-                new_count = pair_counts.get(pair, 0) - freq
-                if new_count <= 0:
-                    pair_counts.pop(pair, None)
+        while len(vocab) < vocab_size and pair_counts:
+            # find the most frequent byte pair
+            most_frequent_pair: tuple[bytes, bytes] = max(
+                pair_counts.items(), key=lambda kv: (kv[1], kv[0])
+            )[0]
+
+            # create new vocabulary entry
+            merges.append(most_frequent_pair)
+            new_token: bytes = most_frequent_pair[0] + most_frequent_pair[1]
+            vocab[len(vocab)] = new_token
+
+            # update frequency table and pair counts
+            delta_freq: dict[tuple[bytes, ...], int] = defaultdict(int)
+            affected_tokens = list(pair_to_tokens.get(most_frequent_pair, []))
+            for byte_tuple in affected_tokens:
+                freq = frequency_table.get(byte_tuple, 0)
+                old_pairs = token_pairs_cache[byte_tuple]
+                # subtract old pair counts
+                for pair in old_pairs:
+                    new_count = pair_counts.get(pair, 0) - freq
+                    if new_count <= 0:
+                        pair_counts.pop(pair, None)
+                    else:
+                        pair_counts[pair] = new_count
+
+                new_byte_tuple = merge(byte_tuple, most_frequent_pair, new_token)
+                # update delta frequencies
+                delta_freq[byte_tuple] -= freq
+                delta_freq[new_byte_tuple] += freq
+
+                new_pairs = token_pairs_cache.get(new_byte_tuple)
+                # add new pair counts
+                if new_pairs is None:
+                    new_pairs = get_pairs(new_byte_tuple)
+                    token_pairs_cache[new_byte_tuple] = new_pairs
+                for pair in new_pairs:
+                    pair_counts[pair] = pair_counts.get(pair, 0) + freq
+
+            tokens_to_add: list[tuple[bytes, ...]] = []
+            tokens_to_remove: list[tuple[bytes, ...]] = []
+            # apply delta frequencies to frequency table
+            for byte_tuple, delta in delta_freq.items():
+                old_freq = frequency_table.get(byte_tuple, 0)
+                new_freq = old_freq + delta
+                if new_freq <= 0:
+                    if old_freq > 0:
+                        tokens_to_remove.append(byte_tuple)
+                    frequency_table.pop(byte_tuple, None)
                 else:
-                    pair_counts[pair] = new_count
+                    if old_freq <= 0:
+                        tokens_to_add.append(byte_tuple)
+                    frequency_table[byte_tuple] = new_freq
 
-            new_byte_tuple = merge(byte_tuple, most_frequent_pair, new_token)
-            # update delta frequencies
-            delta_freq[byte_tuple] -= freq
-            delta_freq[new_byte_tuple] += freq
+            # update pair_to_tokens mapping
+            for byte_tuple in tokens_to_remove:
+                pairs = token_pairs_cache[byte_tuple]
+                for pair in set(pairs):
+                    token_set = pair_to_tokens.get(pair)
+                    if not token_set:
+                        continue
+                    token_set.discard(byte_tuple)
+                    if not token_set:
+                        pair_to_tokens.pop(pair, None)
+            for byte_tuple in tokens_to_add:
+                pairs = token_pairs_cache[byte_tuple]
+                for pair in set(pairs):
+                    pair_to_tokens[pair].add(byte_tuple)
 
-            new_pairs = token_pairs_cache.get(new_byte_tuple)
-            # add new pair counts
-            if new_pairs is None:
-                new_pairs = get_pairs(new_byte_tuple)
-                token_pairs_cache[new_byte_tuple] = new_pairs
-            for pair in new_pairs:
-                pair_counts[pair] = pair_counts.get(pair, 0) + freq
-
-        tokens_to_add: list[tuple[bytes, ...]] = []
-        tokens_to_remove: list[tuple[bytes, ...]] = []
-        # apply delta frequencies to frequency table
-        for byte_tuple, delta in delta_freq.items():
-            old_freq = frequency_table.get(byte_tuple, 0)
-            new_freq = old_freq + delta
-            if new_freq <= 0:
-                if old_freq > 0:
-                    tokens_to_remove.append(byte_tuple)
-                frequency_table.pop(byte_tuple, None)
-            else:
-                if old_freq <= 0:
-                    tokens_to_add.append(byte_tuple)
-                frequency_table[byte_tuple] = new_freq
-
-        # update pair_to_tokens mapping
-        for byte_tuple in tokens_to_remove:
-            pairs = token_pairs_cache[byte_tuple]
-            for pair in set(pairs):
-                token_set = pair_to_tokens.get(pair)
-                if not token_set:
-                    continue
-                token_set.discard(byte_tuple)
-                if not token_set:
-                    pair_to_tokens.pop(pair, None)
-        for byte_tuple in tokens_to_add:
-            pairs = token_pairs_cache[byte_tuple]
-            for pair in set(pairs):
-                pair_to_tokens[pair].add(byte_tuple)
+            # Update progress bar
+            progress.update(merge_task, advance=1)
 
     if save_dir is not None:
         logger.info(f"Saving vocabulary and merges to directory: {save_dir}")
