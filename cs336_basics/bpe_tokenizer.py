@@ -6,7 +6,13 @@ from collections import defaultdict
 import pickle
 from loguru import logger
 import time
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn
+from rich.progress import (
+    Progress,
+    BarColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TimeElapsedColumn,
+)
 
 
 PRETOKEN_PATTERN = (
@@ -285,7 +291,7 @@ def train_bpe(
     logger.info(f"Vocabulary size: {vocab_size}")
     logger.info(f"Number of processes: {num_processes}")
     if save_dir is not None:
-        logger.info(f"Saving vocabulary and merges to directory: {save_dir}")
+        logger.info(f"vocabulary and merges will be saved to: {save_dir}")
 
     # read and chunk the text
     chunks: list[str] = []
@@ -308,6 +314,12 @@ def train_bpe(
     for sub_frequency_table in results:
         for k, v in sub_frequency_table.items():
             frequency_table[k] += v
+
+    logger.info(
+        "Completed pretokenization,time is {:.2f} seconds".format(
+            time.time() - start_time
+        )
+    )
 
     vocab: dict[int, bytes] = {}
     # add special tokens
@@ -435,3 +447,25 @@ def train_bpe(
     logger.info(f"BPE training completed in {elapsed_time:.2f} seconds")
 
     return vocab, merges
+
+
+if __name__ == "__main__":
+
+    input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    vocab_size = 10000
+    special_tokens = ["<|endoftext|>"]
+    num_processes = 8
+    save_dir = "bpe_tokenizer_output"
+    vocab, merges = train_bpe(
+        input_path=input_path,
+        vocab_size=vocab_size,
+        special_tokens=special_tokens,
+        num_processes=num_processes,
+        save_dir=save_dir,
+    )
+
+    # print the longest tokens in the vocabulary
+    longest_tokens = sorted(vocab.values(), key=len, reverse=True)[:10]
+    print("Longest tokens in the vocabulary:")
+    for token in longest_tokens:
+        print(token)
