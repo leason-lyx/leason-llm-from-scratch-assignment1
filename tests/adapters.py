@@ -17,6 +17,9 @@ from cs336_basics.operator import (
     RMSNorm,
     SwiGLU,
     RotaryPositionalEmbedding,
+    MultiheadSelfAttention,
+    TransformerBlock,
+    TransformerLM,
 )
 
 
@@ -158,7 +161,19 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    seq_len = in_features.shape[-2]
+    theta = None  # No RoPE
+    mh_attn = MultiheadSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        max_seq_len=seq_len,
+        q_proj_weight=q_proj_weight,
+        k_proj_weight=k_proj_weight,
+        v_proj_weight=v_proj_weight,
+        o_proj_weight=o_proj_weight,
+    )
+    output = mh_attn.forward(x=in_features)
+    return output
 
 
 def run_multihead_self_attention_with_rope(
@@ -198,7 +213,18 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mh_attn = MultiheadSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        q_proj_weight=q_proj_weight,
+        k_proj_weight=k_proj_weight,
+        v_proj_weight=v_proj_weight,
+        o_proj_weight=o_proj_weight,
+    )
+    output = mh_attn.forward(x=in_features, token_positions=token_positions)
+    return output
 
 
 def run_rope(
@@ -295,7 +321,16 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    trans_block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        weights=weights,
+    )
+    output = trans_block.forward(x=in_features)
+    return output
 
 
 def run_transformer_lm(
@@ -377,7 +412,18 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+        weights=weights,
+    )
+    output = transformer_lm.forward(in_indices=in_indices)
+    return output
 
 
 def run_rmsnorm(
