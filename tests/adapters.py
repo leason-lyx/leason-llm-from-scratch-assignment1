@@ -10,8 +10,8 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from cs336_basics.bpe_tokenizer import BpeTokenizer, train_bpe
-from cs336_basics.operator import softmax, scaled_dot_product_attention
-from cs336_basics.operator import (
+from cs336_basics.myoperator import softmax, scaled_dot_product_attention
+from cs336_basics.myoperator import (
     Linear,
     Embedding,
     RMSNorm,

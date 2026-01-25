@@ -33,6 +33,10 @@ b' encouragement'
 (b) pretokenize花了大部分时间（605.26s）。后面的merge只花了20s。
     内存占用scalene测多进程测出来的似乎不准。
 
+## BPE Training on OWT
+
+(a) 
+
 ## Transformer LM resource accounting
 
 (a)
