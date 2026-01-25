@@ -109,6 +109,12 @@ def get_frequency_table(
     return frequency_table
 
 
+def _get_frequency_table_star(
+    args: tuple[str, list[str], re.Pattern],
+) -> dict[tuple[bytes, ...], int]:
+    return get_frequency_table(*args)
+
+
 def merge(
     byte_tuple: tuple[bytes, ...], merge_pair: tuple[bytes, bytes], merge_token: bytes
 ) -> tuple[bytes, ...]:
@@ -285,6 +291,7 @@ def train_bpe(
     special_tokens: list[str],
     num_processes: int = 8,
     save_dir: str | os.PathLike | None = None,
+    max_chunk_bytes: int = 16 * 1024 * 1024,
 ):
     """
     parameters:
@@ -294,6 +301,7 @@ def train_bpe(
         special_tokens: list[str] A list of strings to add to the vocabulary. These special tokens do not
         otherwise affect BPE training.
         num_processes: int Number of processes to use for chunking and pretokenization.
+        max_chunk_bytes: int Target max size (in bytes) for each chunk to reduce memory pressure.
 
     return:
         vocab: dict[int, bytes] The tokenizer vocabulary, a mapping from int (token ID in the vocabulary) to bytes (token bytes).
@@ -306,30 +314,52 @@ def train_bpe(
     logger.info(f"Input path: {input_path}")
     logger.info(f"Vocabulary size: {vocab_size}")
     logger.info(f"Number of processes: {num_processes}")
+    logger.info(f"Special tokens: {special_tokens}")
+    logger.info(f"Max chunk bytes: {max_chunk_bytes / (1024 * 1024)} MB")
     if save_dir is not None:
         logger.info(f"vocabulary and merges will be saved to: {save_dir}")
 
     # read and chunk the text
-    chunks: list[str] = []
     with open(input_path, "rb") as f:
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            chunks.append(chunk)
-
-    # pretokenization
-    frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
-    rx = re.compile(PRETOKEN_PATTERN)
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        results = pool.starmap(
-            get_frequency_table,
-            [(chunk, special_tokens, rx) for chunk in chunks],
+        if max_chunk_bytes < 1:
+            raise ValueError("max_chunk_bytes must be >= 1")
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        f.seek(0)
+        desired_num_chunks = max(
+            1,
+            num_processes,
+            (file_size + max_chunk_bytes - 1) // max_chunk_bytes,
         )
-    for sub_frequency_table in results:
-        for k, v in sub_frequency_table.items():
-            frequency_table[k] += v
+        boundaries = find_chunk_boundaries(f, desired_num_chunks, b"<|endoftext|>")
+        num_chunks = max(0, len(boundaries) - 1)
+
+        def iter_chunks() -> Iterator[str]:
+            for start, end in zip(boundaries[:-1], boundaries[1:]):
+                f.seek(start)
+                yield f.read(end - start).decode("utf-8", errors="ignore")
+
+        # pretokenization
+        frequency_table: dict[tuple[bytes, ...], int] = defaultdict(int)
+        rx = re.compile(PRETOKEN_PATTERN)
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            with Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+            ) as progress:
+                pretok_task = progress.add_task(
+                    "[green]Pretokenizing...", total=num_chunks
+                )
+                for sub_frequency_table in pool.imap_unordered(
+                    _get_frequency_table_star,
+                    ((chunk, special_tokens, rx) for chunk in iter_chunks()),
+                ):
+                    for k, v in sub_frequency_table.items():
+                        frequency_table[k] += v
+                    progress.update(pretok_task, advance=1)
 
     logger.info(
         "Completed pretokenization,time is {:.2f} seconds".format(
@@ -486,11 +516,11 @@ def train_bpe(
 
 if __name__ == "__main__":
 
-    input_path = "data/TinyStoriesV2-GPT4-train.txt"
-    vocab_size = 10000
-    special_tokens = ["<|endoftext|>"]
+    input_path = "data/owt_train.txt"
+    vocab_size = 32000
+    special_tokens = []
     num_processes = 8
-    save_dir = "tinystories_tokenizer"
+    save_dir = "owt_tokenizer"
     vocab, merges = train_bpe(
         input_path=input_path,
         vocab_size=vocab_size,
@@ -500,7 +530,7 @@ if __name__ == "__main__":
     )
 
     # print the longest tokens in the vocabulary
-    longest_tokens = sorted(vocab.values(), key=len, reverse=True)[:10]
+    longest_tokens = sorted(vocab.values(), key=len, reverse=True)[:30]
     print("Longest tokens in the vocabulary:")
     for token in longest_tokens:
         print(token)
