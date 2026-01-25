@@ -3,6 +3,7 @@ from typing import BinaryIO, Iterable, Iterator
 import multiprocessing
 import regex as re
 from collections import defaultdict
+import heapq
 import pickle
 from loguru import logger
 import time
@@ -131,6 +132,21 @@ def get_pairs(
     byte_tuple: tuple[bytes, ...],
 ) -> tuple[tuple[bytes, bytes], ...]:
     return tuple((byte_tuple[i], byte_tuple[i + 1]) for i in range(len(byte_tuple) - 1))
+
+
+class _ReversePairKey:
+    __slots__ = ("pair",)
+
+    def __init__(self, pair: tuple[bytes, bytes]):
+        self.pair = pair
+
+    def __lt__(self, other: "_ReversePairKey") -> bool:
+        return self.pair > other.pair
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _ReversePairKey):
+            return False
+        return self.pair == other.pair
 
 
 class BpeTokenizer:
@@ -347,6 +363,11 @@ def train_bpe(
             pair_counts[pair] += freq
             pair_to_tokens[pair].add(byte_tuple)
 
+    pair_heap: list[tuple[int, _ReversePairKey, tuple[bytes, bytes]]] = [
+        (-count, _ReversePairKey(pair), pair) for pair, count in pair_counts.items()
+    ]
+    heapq.heapify(pair_heap)
+
     # Calculate total merges needed
     initial_vocab_size = len(vocab)
     total_merges = vocab_size - initial_vocab_size
@@ -364,9 +385,14 @@ def train_bpe(
 
         while len(vocab) < vocab_size and pair_counts:
             # find the most frequent byte pair
-            most_frequent_pair: tuple[bytes, bytes] = max(
-                pair_counts.items(), key=lambda kv: (kv[1], kv[0])
-            )[0]
+            while pair_heap:
+                neg_count, _, candidate_pair = heapq.heappop(pair_heap)
+                current_count = pair_counts.get(candidate_pair)
+                if current_count is not None and current_count == -neg_count:
+                    most_frequent_pair = candidate_pair
+                    break
+            else:
+                break
 
             # create new vocabulary entry
             merges.append(most_frequent_pair)
@@ -376,6 +402,7 @@ def train_bpe(
             # update frequency table and pair counts
             delta_freq: dict[tuple[bytes, ...], int] = defaultdict(int)
             affected_tokens = list(pair_to_tokens.get(most_frequent_pair, []))
+            updated_pairs: dict[tuple[bytes, bytes], int] = {}
             for byte_tuple in affected_tokens:
                 freq = frequency_table.get(byte_tuple, 0)
                 old_pairs = token_pairs_cache[byte_tuple]
@@ -384,8 +411,10 @@ def train_bpe(
                     new_count = pair_counts.get(pair, 0) - freq
                     if new_count <= 0:
                         pair_counts.pop(pair, None)
+                        updated_pairs[pair] = 0
                     else:
                         pair_counts[pair] = new_count
+                        updated_pairs[pair] = new_count
 
                 new_byte_tuple = merge(byte_tuple, most_frequent_pair, new_token)
                 # update delta frequencies
@@ -398,7 +427,13 @@ def train_bpe(
                     new_pairs = get_pairs(new_byte_tuple)
                     token_pairs_cache[new_byte_tuple] = new_pairs
                 for pair in new_pairs:
-                    pair_counts[pair] = pair_counts.get(pair, 0) + freq
+                    new_count = pair_counts.get(pair, 0) + freq
+                    pair_counts[pair] = new_count
+                    updated_pairs[pair] = new_count
+
+            for pair, count in updated_pairs.items():
+                if count > 0:
+                    heapq.heappush(pair_heap, (-count, _ReversePairKey(pair), pair))
 
             tokens_to_add: list[tuple[bytes, ...]] = []
             tokens_to_remove: list[tuple[bytes, ...]] = []
