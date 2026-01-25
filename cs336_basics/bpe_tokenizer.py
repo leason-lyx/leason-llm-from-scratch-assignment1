@@ -1,5 +1,6 @@
 import os
-from typing import BinaryIO, Iterable, Iterator
+from typing import BinaryIO
+from collections.abc import Iterable, Iterator
 import multiprocessing
 import regex as re
 from collections import defaultdict

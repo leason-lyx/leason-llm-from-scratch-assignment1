@@ -254,3 +254,57 @@ LM head：5.8%
 
 (e)
 把 GPT-2 XL 的 context length 从 1,024 提到 16,384（16 倍）后，由于注意力相关矩阵乘的计算量随序列长度按平方增长，一次前向传播的总矩阵乘 FLOPs 从约 4.51×10¹² 增加到约 1.50×10¹⁴（约 33.1 倍）。同时 FLOPs 构成从“FFN/投影占主导”转为“注意力占主导”：QKᵀ+AV 合计占比由约 7.1% 升至约 55.2%，FFN 占比由约 66.9% 降至约 32.3%（QKV、输出投影和 LM head 占比均明显下降）。
+
+## Tuning the learning rate
+
+在lr=1e1和1e2的时候，能下降。1e2的时候下降得更快
+在lr=1e3的时候，就爆炸了。
+
+## Resource accounting for training with AdamW
+
+(a)
+对于每个参数，要存储的内容有：参数本身，梯度，一阶矩，二阶矩，共四个
+参数量：
+
+- Transformer block:
+  - RMSNorm: 2×d_model
+    - Multi-head: self-attention sublayer
+    - QKV投影: 3×d_model×d_model
+    - 输出投影: 1×d_model×d_model
+  - FFN
+    - W1: d_model×(4×d_model)
+    - W2: (4×d_model)×d_model
+- 最终的RMSNorm: d_model
+- output embedding: vocab_size×d_model
+
+激活值:
+
+- Transformer block:
+  - RMSNorm: 2×batch_size×context_length×d_model
+  - Multi-head: self-attention sublayer
+    - QKV投影: 3×batch_size×context_length×d_model
+    - QK乘积: batch_size×num_heads×context_length×context_length
+    - softmax: batch_size×num_heads×context_length×context_length
+    - weighted sum of values: batch_size×context_length×d_model
+    - 输出投影: batch_size×context_length×d_model
+  - FFN
+    - W1: batch_size×context_length×(4×d_model)
+    - SiLU: batch_size×context_length×(4×d_model)
+    - W2: batch_size×context_length×d_model
+- 最终的RMSNorm: batch_size×context_length×d_model
+- output embedding: batch_size×context_length×vocab_size
+- cross-entropy on logits: batch_size×context_length×vocab_size
+
+显存占用是4*参数量+激活量
+
+N_parameters=num_layers×(12×d_model×d_model+2×d_model)+d_model+vocab_size×d_model
+N_activations=num_layers×(16×batch_size×context_length×d_model+2×batch_size×num_heads×context_length×context_length)+(batch_size×context_length×d_model)+2×(batch_size×context_length×vocab_size)
+
+(b)
+待补充
+
+(c)
+待补充
+
+(d)
+待补充

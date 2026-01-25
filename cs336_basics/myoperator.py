@@ -1,12 +1,31 @@
+import os
+import typing
 import torch
 from torch import Tensor, LongTensor
 import torch.nn as nn
+import numpy.typing as npt
+import numpy as np
+from collections.abc import Callable, Iterable
 from jaxtyping import jaxtyped, Float, Int, Bool
-from einops import rearrange, einsum, reduce, pack, unpack
+from einops import rearrange, einsum, reduce
 import math
 from beartype import beartype as typechecker
 
 
+@jaxtyped(typechecker=typechecker)
+def silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
+    """SiLU activation function.
+
+    Args:
+        in_features: Input tensor of arbitrary shape.
+
+    Returns:
+        A tensor of the same shape as `in_features` with SiLU applied element-wise.
+    """
+    return in_features * torch.sigmoid(in_features)
+
+
+@jaxtyped(typechecker=typechecker)
 def softmax(x: Float[Tensor, "..."], dim: int = -1) -> Float[Tensor, "..."]:
     """Compute the softmax of the input tensor along dim.
 
@@ -27,25 +46,152 @@ def softmax(x: Float[Tensor, "..."], dim: int = -1) -> Float[Tensor, "..."]:
     return softmax_x
 
 
+@jaxtyped(typechecker=typechecker)
 def scaled_dot_product_attention(
-    Q: Float[Tensor, "b ... seq_len d_k"],
-    K: Float[Tensor, "b ... seq_len d_k"],
-    V: Float[Tensor, "b ... seq_len d_v"],
-    mask: Bool[Tensor, "seq_len seq_len"] | None = None,
-) -> Float[Tensor, "b ... d_v"]:
+    Q: Float[Tensor, "... q_len d_k"],
+    K: Float[Tensor, "... k_len d_k"],
+    V: Float[Tensor, "... k_len d_v"],
+    mask: Bool[Tensor, "... q_len k_len"] | None = None,
+) -> Float[Tensor, "... q_len d_v"]:
     d_k = Q.shape[-1]
-    qk = einsum(Q, K, "b ... q d_k, b ... k d_k -> b ... q k") / math.sqrt(d_k)
+    qk = einsum(Q, K, "... q d_k,... k d_k -> ... q k") / math.sqrt(d_k)
     if mask is not None:
-        qk_mask: Float[Tensor, "b ... seq_len seq_len"] = qk.masked_fill(
+        qk_mask: Float[Tensor, "... q_len k_len"] = qk.masked_fill(
             mask=~mask, value=float("-inf")
         )
     else:
-        qk_mask: Float[Tensor, "b ... seq_len seq_len"] = qk
+        qk_mask: Float[Tensor, "... q_len k_len"] = qk
     softmax_value = softmax(qk_mask, dim=-1)
-    result: Float[Tensor, "b ... d_v"] = einsum(
-        softmax_value, V, "b ... q k, b ... k d_v -> b ... q d_v"
+    result: Float[Tensor, "... q_len d_v"] = einsum(
+        softmax_value, V, "... q k, ... k d_v -> ... q d_v"
     )
     return result
+
+
+@jaxtyped(typechecker=typechecker)
+def cross_entropy(
+    logits: Float[Tensor, "... seq_len vocab_size"], targets: Int[Tensor, "... seq_len"]
+) -> Float[Tensor, "..."]:
+    """
+    Returns:
+        mean cross-entropy loss across seq_len for each example in the batch
+    """
+    logits_max: Float[Tensor, "... seq_len 1"] = torch.max(
+        logits, dim=-1, keepdim=True
+    ).values
+    logits_stable: Float[Tensor, "... seq_len vocab_size"] = logits - logits_max
+    logits_expsum: Float[Tensor, "... seq_len 1"] = torch.exp(logits_stable).sum(
+        dim=-1, keepdim=True
+    )
+    log_probs: Float[Tensor, "... seq_len vocab_size"] = logits_stable - torch.log(
+        logits_expsum
+    )
+    result: Float[Tensor, "..."] = rearrange(
+        -torch.gather(
+            log_probs, dim=-1, index=rearrange(targets, "... seq_len -> ... seq_len 1")
+        ),
+        "... seq_len 1 -> ... seq_len",
+    ).mean(dim=-1)
+    return result
+
+
+def lr_cosine_schedule(
+    t: int, lr_max: float, lr_min: float, T_warmup: int, T_c: int
+) -> float:
+    if t < T_warmup:
+        return lr_max * t / T_warmup
+    elif t <= T_c:
+        return lr_min + 0.5 * (lr_max - lr_min) * (
+            1 + math.cos(math.pi * (t - T_warmup) / (T_c - T_warmup))
+        )
+    else:
+        return lr_min
+
+
+def get_batch(
+    dataset: npt.NDArray, batch_size: int, context_length: int, device: str
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Given a dataset (a 1D numpy array of integers) and a desired batch size and
+    context length, sample language modeling input sequences and their corresponding
+    labels from the dataset.
+
+    Args:
+        dataset: 1D numpy array of integer token IDs in the dataset.
+        batch_size: Desired batch size to sample.
+        context_length: Desired context length of each sampled example.
+        device: PyTorch device string (e.g., 'cpu' or 'cuda:0') indicating the device
+            to place the sampled input sequences and labels on.
+
+    Returns:
+        Tuple of torch.LongTensors of shape (batch_size, context_length). The first tuple item
+        is the sampled input sequences, and the second tuple item is the corresponding
+        language modeling labels.
+    """
+    n = len(dataset)
+    indices = np.random.randint(0, n - context_length, size=batch_size)
+    input_sequences = np.stack([dataset[i : i + context_length] for i in indices])
+    labels = np.stack([dataset[i + 1 : i + context_length + 1] for i in indices])
+    input_tensor = torch.tensor(input_sequences, dtype=torch.long, device=device)
+    labels_tensor = torch.tensor(labels, dtype=torch.long, device=device)
+    return input_tensor, labels_tensor
+
+
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
+    eps = 1e-6
+    params = [param for param in parameters if param.grad is not None]
+    if not params:
+        return
+
+    total_norm_sq = torch.zeros((), device=params[0].grad.device)  # type: ignore
+    for param in params:
+        grad = param.grad.detach()  # type: ignore
+        if grad.is_sparse:
+            grad = grad.coalesce()
+            grad_norm = grad._values().norm(2)
+        else:
+            grad_norm = grad.norm(2)
+        total_norm_sq = total_norm_sq + grad_norm.pow(2)
+    total_norm = total_norm_sq.sqrt()
+
+    if total_norm > max_l2_norm:
+        clip_coef = max_l2_norm / (total_norm + eps)
+        for param in params:
+            param.grad.detach().mul_(clip_coef)  # type: ignore
+
+
+def save_checkpoint(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    iteration: int,
+    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+) -> None:
+    """
+    should dump all the state from the first three parameters into the file-like object out.
+    """
+    model_weights: dict = model.state_dict()
+    optimizer_state: dict = optimizer.state_dict()
+    checkpoint = {
+        "model_state_dict": model_weights,
+        "optimizer_state_dict": optimizer_state,
+        "iteration": iteration,
+    }
+    torch.save(checkpoint, out)
+
+
+def load_checkpoint(
+    src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> int:
+    """
+    load a checkpoint from the file-like object src
+    and restore the state of the model and optimizer.
+    """
+    checkpoint = torch.load(src)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    return checkpoint["iteration"]
 
 
 class Linear(nn.Module):
@@ -659,3 +805,103 @@ class TransformerLM(nn.Module):
         x = self.ln_final.forward(x)
         logits: Float[Tensor, "batch_size seq_len vocab_size"] = self.lm_head.forward(x)
         return logits
+
+
+class SGD(torch.optim.Optimizer):
+
+    def __init__(
+        self,
+        params: Iterable[torch.nn.Parameter],
+        lr: float = 1e-3,
+    ) -> None:
+        defaults = {"lr": lr}
+        super().__init__(params, defaults)
+
+    def step(self, closure: Callable | None = None):  # type: ignore
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group["lr"]  # get learning rate
+            for param in group["params"]:
+                if param.grad is None:
+                    continue
+                state = self.state[param]
+                t = state.get("t", 0)
+                grad = param.grad.data
+                param.data -= lr / math.sqrt(t + 1) * grad
+                state["t"] = t + 1
+
+        return loss
+
+
+class AdamW(torch.optim.Optimizer):
+    def __init__(
+        self,
+        params: Iterable[torch.nn.Parameter],
+        lr: float,
+        betas: tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+    ) -> None:
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+        }
+        super().__init__(params, defaults)
+
+    def step(self, closure: Callable | None = None):  # type: ignore
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group["lr"]
+            beta1, beta2 = group["betas"]
+            eps = group["eps"]
+            weight_decay = group["weight_decay"]
+
+            for param in group["params"]:
+                if param.grad is None:
+                    continue
+                grad = param.grad.data
+                state = self.state[param]
+
+                if "step" not in state:
+                    state["step"] = 0
+                    state["first_moment"] = torch.zeros_like(param.data)
+                    state["second_moment"] = torch.zeros_like(param.data)
+
+                state["step"] += 1
+                first_moment = state["first_moment"]
+                second_moment = state["second_moment"]
+                first_moment.mul_(beta1).add_(grad, alpha=1 - beta1)
+                second_moment.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                bias_correction1 = 1 - beta1 ** state["step"]
+                bias_correction2 = 1 - beta2 ** state["step"]
+                adjusted_lr = lr * math.sqrt(bias_correction2) / bias_correction1
+                denom = torch.sqrt(second_moment).add_(eps)
+                param.data.addcdiv_(first_moment, denom, value=-adjusted_lr)
+
+                if weight_decay != 0:
+                    param.data.add_(param.data, alpha=-lr * weight_decay)
+
+        return loss
+
+
+def test_sgd(lr: float = 1e-1) -> None:
+    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
+    opt = SGD([weights], lr=lr)
+    for t in range(10):
+        opt.zero_grad()  # Reset the gradients for all learnable parameters.
+        loss = (weights**2).mean()  # Compute a scalar loss value.
+        print(loss.cpu().item())
+        loss.backward()  # Run backward pass, which computes gradients.
+        opt.step()  # Run optimizer step.
+
+
+if __name__ == "__main__":
+    print("Testing SGD optimizer, learning rate=1e1")
+    test_sgd(lr=1e1)
+    print("Testing SGD optimizer, learning rate=1e2")
+    test_sgd(lr=1e2)
+    print("Testing SGD optimizer, learning rate=1e3")
+    test_sgd(lr=1e3)
