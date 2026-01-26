@@ -169,3 +169,5 @@ test_results.xml
 make_submission.sh
 scalene-profile.html
 scalene-profile.json
+wandb_key.txt
+wandb/

@@ -623,5 +623,5 @@ if __name__ == "__main__":
         dataset_text_path="data/TinyStoriesV2-GPT4-valid.txt",
         tokenizer_path="tinystories_tokenizer",
         save_path="data/tinystories_minimal_test_token_ids.npy",
-        max_len=20,
+        max_len=257,
     )

@@ -844,13 +844,13 @@ class TransformerLM(nn.Module):
         if seq_len > self.context_length:
             raise ValueError("sequence_length exceeds context_length.")
 
-        x: Float[Tensor, "batch_size seq_len d_model"] = self.token_embeddings.forward(
+        x: Float[Tensor, "batch_size seq_len d_model"] = self.token_embeddings(
             token_ids=in_indices
         )
         for layer in self.layers:
-            x = layer.forward(x)
-        x = self.ln_final.forward(x)
-        logits: Float[Tensor, "batch_size seq_len vocab_size"] = self.lm_head.forward(x)
+            x = layer(x)
+        x = self.ln_final(x)
+        logits: Float[Tensor, "batch_size seq_len vocab_size"] = self.lm_head(x)
         return logits
 
 

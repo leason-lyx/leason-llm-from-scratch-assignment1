@@ -3,7 +3,7 @@
 # Ability to configure and control the various model and optimizer hyperparameters.
 # Memory-efficient loading of training and validation large datasets with flag mmap_mode='r' to np.load.
 # Serializing checkpoints to a user-provided path.
-# Periodically logging training and validation performance via swanlab.
+# Periodically logging training and validation performance via Weights & Biases (wandb).
 import argparse
 import json
 import os
@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import torch
-import swanlab
+import wandb
 from rich.progress import (
     Progress,
     BarColumn,
@@ -27,13 +27,11 @@ from myoperator import (
     get_batch,
     gradient_clipping,
     save_checkpoint,
-    load_checkpoint,
     cross_entropy,
     TransformerLM,
     AdamW,
     LRCosineScheduler,
 )
-from bpe_tokenizer import BPETokenizer
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -41,10 +39,31 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+def _read_wandb_api_key() -> str | None:
+    if key := os.environ.get("WANDB_API_KEY"):
+        return key.strip() or None
+    candidate_paths = [
+        Path.cwd() / "wandb_key.txt",
+        Path(__file__).resolve().parents[1] / "wandb_key.txt",
+    ]
+    for path in candidate_paths:
+        if not path.is_file():
+            continue
+        key = path.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    return None
+
+
 def train(config_path: Path) -> None:
     # get training config
     config: dict[str, Any] = _load_json(config_path)
     run_name: str = config["run_name"]
+    wandb_config = config["wandb"]
+    wandb_project = wandb_config["project"]
+    wandb_tags = wandb_config["tags"]
+    wandb_watch_log_freq = wandb_config["watch_log_freq"]
+    wandb_watch_log_freq = int(wandb_watch_log_freq)
     if config["device"] == "cuda" and torch.cuda.is_available():
         print("Using CUDA")
         device = torch.device("cuda")
@@ -97,76 +116,91 @@ def train(config_path: Path) -> None:
     train_dataset_path = Path(config["training"]["train_dataset_path"])
     valid_dataset_path = Path(config["training"]["valid_dataset_path"])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-    swanlab.init(project_name="cs336_basics", run_name=run_name, config=config)
-
-    # load datasets
-    train_data: npt.NDArray = np.load(train_dataset_path, mmap_mode="r")
-    valid_data: npt.NDArray = np.load(valid_dataset_path, mmap_mode="r")
-
-    # initialize model and optimizer
-    model = TransformerLM(
-        vocab_size=vocab_size,
-        context_length=context_length,
-        d_model=d_model,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        d_ff=d_ff,
-        rope_theta=rope_theta,
-        device=device,
-        dtype=model_dtype,
+    # initialize wandb
+    run = wandb.init(
+        project=wandb_project,
+        name=run_name,
+        config=config,
+        tags=wandb_tags,
+        mode="online",
     )
-    optimizer = AdamW(
-        model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
-    )
-    scheduler = LRCosineScheduler(
-        optimizer, lr_max=lr_max, lr_min=lr_min, T_warmup=T_warmup, T_c=T_c
-    )
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-    ) as progress:
-        training_task = progress.add_task("Training...", total=max_iters)
-        for iter in range(1, max_iters + 1):
-            model.train()
-            xb, yb = get_batch(train_data, batch_size, context_length, device)
-            logits = model(xb)
-            loss = cross_entropy(logits, yb).mean()
-            optimizer.zero_grad()
-            loss.backward()
-            if grad_clip_norm is not None:
-                gradient_clipping(model.parameters(), grad_clip_norm)
-            optimizer.step()
-            scheduler.step()
-            # update progress bar
-            progress.update(training_task, advance=1)
-            # print training status
-            progress.console.print(
-                f"Iter {iter}/{max_iters}, Train Loss: {loss.item():.4f}"
-            )
-            # log training loss
-            swanlab.log({"train/loss": loss.item()}, step=iter)
-            if iter % run_valid_interval == 0 or iter == max_iters:
-                model.eval()
-                with torch.no_grad():
-                    xb_val, yb_val = get_batch(
-                        valid_data, batch_size, context_length, device
-                    )
-                    logits_val = model(xb_val)
-                    val_loss = cross_entropy(logits_val, yb_val).mean()
-                    swanlab.log({"valid/loss": val_loss.item()}, step=iter)
 
-            # save checkpoint
-            if iter % (save_checkpoint_interval) == 0 or iter == max_iters:
-                save_checkpoint(
-                    model,
-                    optimizer,
-                    iter,
-                    checkpoint_dir / f"checkpoint_iter{iter}.pt",
+    try:
+        # load datasets
+        train_data: npt.NDArray = np.load(train_dataset_path, mmap_mode="r")
+        valid_data: npt.NDArray = np.load(valid_dataset_path, mmap_mode="r")
+
+        # initialize model and optimizer
+        model = TransformerLM(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            device=device,
+            dtype=model_dtype,
+        )
+        wandb.watch(
+            model,
+            log="all",
+            log_freq=wandb_watch_log_freq,
+        )
+        optimizer = AdamW(
+            model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
+        )
+        scheduler = LRCosineScheduler(
+            optimizer, lr_max=lr_max, lr_min=lr_min, T_warmup=T_warmup, T_c=T_c
+        )
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            training_task = progress.add_task("Training...", total=max_iters)
+            for iter in range(1, max_iters + 1):
+                model.train()
+                xb, yb = get_batch(train_data, batch_size, context_length, device)
+                logits = model(xb)
+                loss = cross_entropy(logits, yb).mean()
+                optimizer.zero_grad()
+                loss.backward()
+                if grad_clip_norm is not None:
+                    gradient_clipping(model.parameters(), grad_clip_norm)
+                optimizer.step()
+                scheduler.step()
+                # update progress bar
+                progress.update(training_task, advance=1)
+                # print training status
+                progress.console.print(
+                    f"Iter {iter}/{max_iters}, Train Loss: {loss.item():.4f}"
                 )
+                # log training loss
+                wandb.log({"train/loss": loss.item()}, step=iter)
+                if iter % run_valid_interval == 0 or iter == max_iters:
+                    model.eval()
+                    with torch.no_grad():
+                        xb_val, yb_val = get_batch(
+                            valid_data, batch_size, context_length, device
+                        )
+                        logits_val = model(xb_val)
+                        val_loss = cross_entropy(logits_val, yb_val).mean()
+                        wandb.log({"valid/loss": val_loss.item()}, step=iter)
+
+                # save checkpoint
+                if iter % (save_checkpoint_interval) == 0 or iter == max_iters:
+                    save_checkpoint(
+                        model,
+                        optimizer,
+                        iter,
+                        checkpoint_dir / f"checkpoint_iter{iter}.pt",
+                    )
+    finally:
+        if run is not None:
+            run.finish()
 
 
 if __name__ == "__main__":
