@@ -15,6 +15,7 @@ from rich.progress import (
     TimeRemainingColumn,
     TimeElapsedColumn,
 )
+import numpy as np
 
 
 PRETOKEN_PATTERN = (
@@ -156,7 +157,7 @@ class _ReversePairKey:
         return self.pair == other.pair
 
 
-class BpeTokenizer:
+class BPETokenizer:
     def __init__(
         self,
         vocab: dict[int, bytes],
@@ -515,19 +516,16 @@ def train_bpe(
     return vocab, merges
 
 
-if __name__ == "__main__":
-
-    input_path = "data/owt_train.txt"
-    vocab_size = 32000
-    special_tokens = []
-    num_processes = 8
-    save_dir = "owt_tokenizer"
+def train_tinystories_tokenizer():
+    """
+    Train a BPE tokenizer on the TinyStories dataset and print the longest tokens in the vocabulary.
+    """
     vocab, merges = train_bpe(
-        input_path=input_path,
-        vocab_size=vocab_size,
-        special_tokens=special_tokens,
-        num_processes=num_processes,
-        save_dir=save_dir,
+        input_path="data/TinyStoriesV2-GPT4-train.txt",
+        vocab_size=10000,
+        special_tokens=["<|endoftext|>"],
+        num_processes=8,
+        save_dir="tinystories_tokenizer",
     )
 
     # print the longest tokens in the vocabulary
@@ -535,3 +533,90 @@ if __name__ == "__main__":
     print("Longest tokens in the vocabulary:")
     for token in longest_tokens:
         print(token)
+
+
+def train_owt_tokenizer():
+    """
+    Train a BPE tokenizer on the OpenWebText dataset and print the longest tokens in the vocabulary.
+    """
+    vocab, merges = train_bpe(
+        input_path="data/owt_train.txt",
+        vocab_size=32000,
+        special_tokens=[],
+        num_processes=8,
+        save_dir="owt_tokenizer",
+    )
+
+    # print the longest tokens in the vocabulary
+    longest_tokens = sorted(vocab.values(), key=len, reverse=True)[:30]
+    print("Longest tokens in the vocabulary:")
+    for token in longest_tokens:
+        print(token)
+
+
+def process_dataset(
+    dataset_text_path: str | os.PathLike,
+    tokenizer_path: str | os.PathLike,
+    save_path: str | os.PathLike,
+) -> None:
+    """
+    Process a text dataset using a BPE tokenizer
+    and save the token IDs to a numpy array.
+
+    Args:
+        dataset_text_path: _path to the text dataset file._
+        tokenizer_path: _path to the BPE tokenizer files (vocab and merges)._
+        save_path: _path to save the numpy array of token IDs._
+    """
+    tokenizer_dir = os.fspath(tokenizer_path)
+    vocab_path = os.path.join(tokenizer_dir, "vocab.pkl")
+    merges_path = os.path.join(tokenizer_dir, "merges.pkl")
+
+    with open(vocab_path, "rb") as vf:
+        vocab: dict[int, bytes] = pickle.load(vf)
+    with open(merges_path, "rb") as mf:
+        merges: list[tuple[bytes, bytes]] = pickle.load(mf)
+
+    special_tokens = ["<|endoftext|>"]
+    tokenizer = BPETokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
+    logger.info(
+        f"Loaded tokenizer from {tokenizer_path} with vocab size {len(tokenizer.vocab)}"
+    )
+
+    with open(os.fspath(dataset_text_path), "r", encoding="utf-8") as f:
+        text: str = f.read()
+    # Encode the text to token IDs
+    logger.info(f"Encoding dataset from {dataset_text_path}")
+    token_ids: list[int] = tokenizer.encode(text)
+    logger.info(f"Encoded {len(token_ids)} tokens")
+
+    vocab_size = len(tokenizer.vocab)
+    if vocab_size <= np.iinfo(np.uint16).max + 1:
+        out_dtype = np.uint16
+    elif vocab_size <= np.iinfo(np.uint32).max + 1:
+        out_dtype = np.uint32
+    else:
+        out_dtype = np.int64
+
+    token_array = np.asarray(token_ids, dtype=out_dtype)
+
+    # Save the token IDs to a numpy file
+    save_path_str = os.fspath(save_path)
+    save_dir = os.path.dirname(save_path_str)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    np.save(save_path_str, token_array)
+
+    logger.info(
+        f"Wrote {token_array.size} tokens to {save_path_str} "
+        f"(dtype={token_array.dtype}, special_tokens={special_tokens})"
+    )
+
+
+if __name__ == "__main__":
+    # train_owt_tokenizer()
+    process_dataset(
+        dataset_text_path="data/TinyStoriesV2-GPT4-train.txt",
+        tokenizer_path="tinystories_tokenizer",
+        save_path="data/tinystories_train_token_ids.npy",
+    )
