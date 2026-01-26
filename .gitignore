@@ -163,6 +163,7 @@ cython_debug/
 *.zip
 
 data/
+checkpoints/
 .DS_Store
 test_results.xml
 make_submission.sh

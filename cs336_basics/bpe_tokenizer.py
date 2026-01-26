@@ -558,6 +558,7 @@ def process_dataset(
     dataset_text_path: str | os.PathLike,
     tokenizer_path: str | os.PathLike,
     save_path: str | os.PathLike,
+    max_len: int | None = None,
 ) -> None:
     """
     Process a text dataset using a BPE tokenizer
@@ -589,6 +590,9 @@ def process_dataset(
     logger.info(f"Encoding dataset from {dataset_text_path}")
     token_ids: list[int] = tokenizer.encode(text)
     logger.info(f"Encoded {len(token_ids)} tokens")
+    if max_len is not None:
+        token_ids = token_ids[:max_len]
+        logger.info(f"Truncated to max length {max_len} tokens")
 
     vocab_size = len(tokenizer.vocab)
     if vocab_size <= np.iinfo(np.uint16).max + 1:
@@ -598,7 +602,7 @@ def process_dataset(
     else:
         out_dtype = np.int64
 
-    token_array = np.asarray(token_ids, dtype=out_dtype)
+    token_array: np.ndarray = np.asarray(token_ids, dtype=out_dtype)
 
     # Save the token IDs to a numpy file
     save_path_str = os.fspath(save_path)
@@ -616,7 +620,8 @@ def process_dataset(
 if __name__ == "__main__":
     # train_owt_tokenizer()
     process_dataset(
-        dataset_text_path="data/TinyStoriesV2-GPT4-train.txt",
+        dataset_text_path="data/TinyStoriesV2-GPT4-valid.txt",
         tokenizer_path="tinystories_tokenizer",
-        save_path="data/tinystories_train_token_ids.npy",
+        save_path="data/tinystories_minimal_test_token_ids.npy",
+        max_len=20,
     )

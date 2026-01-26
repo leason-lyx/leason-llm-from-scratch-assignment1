@@ -109,7 +109,10 @@ def lr_cosine_schedule(
 
 
 def get_batch(
-    dataset: npt.NDArray, batch_size: int, context_length: int, device: str
+    dataset: npt.NDArray,
+    batch_size: int,
+    context_length: int,
+    device: str | torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
@@ -332,8 +335,6 @@ class RMSNorm(nn.Module):
         rms: Float[Tensor, "batch_size sequence_length 1"] = torch.sqrt(
             mean_sq + self.eps
         )
-        print(x.size())
-        print(rms.size())
         result: Float[Tensor, "batch_size sequence_length d_model"] = x / rms * self.g
         return result.to(in_dtype)
 
@@ -347,22 +348,48 @@ class SwiGLU(nn.Module):
         w1_weight: Float[Tensor, "d_ff d_model"] | None = None,
         w2_weight: Float[Tensor, "d_model d_ff"] | None = None,
         w3_weight: Float[Tensor, "d_ff d_model"] | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
         self.d_model = d_model
         self.d_ff = d_ff
         if w1_weight is not None:
-            self.w1 = Linear(in_features=d_model, out_features=d_ff, weights=w1_weight)
+            self.w1 = Linear(
+                in_features=d_model,
+                out_features=d_ff,
+                weights=w1_weight,
+                device=device,
+                dtype=dtype,
+            )
         else:
-            self.w1 = Linear(in_features=d_model, out_features=d_ff)
+            self.w1 = Linear(
+                in_features=d_model, out_features=d_ff, device=device, dtype=dtype
+            )
         if w2_weight is not None:
-            self.w2 = Linear(in_features=d_ff, out_features=d_model, weights=w2_weight)
+            self.w2 = Linear(
+                in_features=d_ff,
+                out_features=d_model,
+                weights=w2_weight,
+                device=device,
+                dtype=dtype,
+            )
         else:
-            self.w2 = Linear(in_features=d_ff, out_features=d_model)
+            self.w2 = Linear(
+                in_features=d_ff, out_features=d_model, device=device, dtype=dtype
+            )
         if w3_weight is not None:
-            self.w3 = Linear(in_features=d_model, out_features=d_ff, weights=w3_weight)
+            self.w3 = Linear(
+                in_features=d_model,
+                out_features=d_ff,
+                weights=w3_weight,
+                device=device,
+                dtype=dtype,
+            )
         else:
-            self.w3 = Linear(in_features=d_model, out_features=d_ff)
+            self.w3 = Linear(
+                in_features=d_model, out_features=d_ff, device=device, dtype=dtype
+            )
 
     @jaxtyped(typechecker=typechecker)
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
@@ -583,7 +610,7 @@ class TransformerBlock(nn.Module):
         d_ff: int,
         max_seq_len: int,
         theta: float,
-        weights: dict[str, Tensor],
+        weights: dict[str, Tensor] | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
@@ -646,7 +673,7 @@ class TransformerBlock(nn.Module):
             d_model=d_model,
             device=device,
             dtype=dtype,
-            weights=weights["ln1.weight"],
+            weights=weights["ln1.weight"] if weights is not None else None,
         )
         self.attn = MultiheadSelfAttention(
             d_model=d_model,
@@ -655,23 +682,33 @@ class TransformerBlock(nn.Module):
             theta=theta,
             device=device,
             dtype=dtype,
-            q_proj_weight=weights["attn.q_proj.weight"],
-            k_proj_weight=weights["attn.k_proj.weight"],
-            v_proj_weight=weights["attn.v_proj.weight"],
-            o_proj_weight=weights["attn.output_proj.weight"],
+            q_proj_weight=(
+                weights["attn.q_proj.weight"] if weights is not None else None
+            ),
+            k_proj_weight=(
+                weights["attn.k_proj.weight"] if weights is not None else None
+            ),
+            v_proj_weight=(
+                weights["attn.v_proj.weight"] if weights is not None else None
+            ),
+            o_proj_weight=(
+                weights["attn.output_proj.weight"] if weights is not None else None
+            ),
         )
         self.ln2 = RMSNorm(
             d_model=d_model,
             device=device,
             dtype=dtype,
-            weights=weights["ln2.weight"],
+            weights=(weights["ln2.weight"] if weights is not None else None),
         )
         self.ffn = SwiGLU(
             d_model=d_model,
             d_ff=d_ff,
-            w1_weight=weights["ffn.w1.weight"],
-            w2_weight=weights["ffn.w2.weight"],
-            w3_weight=weights["ffn.w3.weight"],
+            w1_weight=(weights["ffn.w1.weight"] if weights is not None else None),
+            w2_weight=(weights["ffn.w2.weight"] if weights is not None else None),
+            w3_weight=(weights["ffn.w3.weight"] if weights is not None else None),
+            device=device,
+            dtype=dtype,
         )
 
     def forward(
@@ -719,7 +756,7 @@ class TransformerLM(nn.Module):
         num_heads: int,
         d_ff: int,
         rope_theta: float,
-        weights: dict[str, Tensor],
+        weights: dict[str, Tensor] | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
@@ -737,7 +774,7 @@ class TransformerLM(nn.Module):
             embedding_dim=d_model,
             device=device,
             dtype=dtype,
-            weights=weights["token_embeddings.weight"],
+            weights=weights["token_embeddings.weight"] if weights is not None else None,
         )
 
         self.layers = nn.ModuleList(
@@ -748,25 +785,35 @@ class TransformerLM(nn.Module):
                     d_ff=d_ff,
                     max_seq_len=context_length,
                     theta=rope_theta,
-                    weights={
-                        "attn.q_proj.weight": weights[
-                            f"layers.{layer_idx}.attn.q_proj.weight"
-                        ],
-                        "attn.k_proj.weight": weights[
-                            f"layers.{layer_idx}.attn.k_proj.weight"
-                        ],
-                        "attn.v_proj.weight": weights[
-                            f"layers.{layer_idx}.attn.v_proj.weight"
-                        ],
-                        "attn.output_proj.weight": weights[
-                            f"layers.{layer_idx}.attn.output_proj.weight"
-                        ],
-                        "ln1.weight": weights[f"layers.{layer_idx}.ln1.weight"],
-                        "ffn.w1.weight": weights[f"layers.{layer_idx}.ffn.w1.weight"],
-                        "ffn.w2.weight": weights[f"layers.{layer_idx}.ffn.w2.weight"],
-                        "ffn.w3.weight": weights[f"layers.{layer_idx}.ffn.w3.weight"],
-                        "ln2.weight": weights[f"layers.{layer_idx}.ln2.weight"],
-                    },
+                    weights=(
+                        {
+                            "attn.q_proj.weight": weights[
+                                f"layers.{layer_idx}.attn.q_proj.weight"
+                            ],
+                            "attn.k_proj.weight": weights[
+                                f"layers.{layer_idx}.attn.k_proj.weight"
+                            ],
+                            "attn.v_proj.weight": weights[
+                                f"layers.{layer_idx}.attn.v_proj.weight"
+                            ],
+                            "attn.output_proj.weight": weights[
+                                f"layers.{layer_idx}.attn.output_proj.weight"
+                            ],
+                            "ln1.weight": weights[f"layers.{layer_idx}.ln1.weight"],
+                            "ffn.w1.weight": weights[
+                                f"layers.{layer_idx}.ffn.w1.weight"
+                            ],
+                            "ffn.w2.weight": weights[
+                                f"layers.{layer_idx}.ffn.w2.weight"
+                            ],
+                            "ffn.w3.weight": weights[
+                                f"layers.{layer_idx}.ffn.w3.weight"
+                            ],
+                            "ln2.weight": weights[f"layers.{layer_idx}.ln2.weight"],
+                        }
+                        if weights is not None
+                        else None
+                    ),
                     device=device,
                     dtype=dtype,
                 )
@@ -778,14 +825,14 @@ class TransformerLM(nn.Module):
             d_model=d_model,
             device=device,
             dtype=dtype,
-            weights=weights["ln_final.weight"],
+            weights=weights["ln_final.weight"] if weights is not None else None,
         )
         self.lm_head = Linear(
             in_features=d_model,
             out_features=vocab_size,
             device=device,
             dtype=dtype,
-            weights=weights["lm_head.weight"],
+            weights=weights["lm_head.weight"] if weights is not None else None,
         )
 
     @jaxtyped(typechecker=typechecker)
@@ -885,6 +932,28 @@ class AdamW(torch.optim.Optimizer):
                     param.data.add_(param.data, alpha=-lr * weight_decay)
 
         return loss
+
+
+class LRCosineScheduler(torch.optim.lr_scheduler.LRScheduler):
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        lr_max: float,
+        lr_min: float,
+        T_warmup: int,
+        T_c: int,
+        last_epoch: int = -1,
+    ) -> None:
+        self.lr_max = lr_max
+        self.lr_min = lr_min
+        self.T_warmup = T_warmup
+        self.T_c = T_c
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self) -> list[float]:
+        t = self.last_epoch
+        lr = lr_cosine_schedule(t, self.lr_max, self.lr_min, self.T_warmup, self.T_c)
+        return [lr for _ in self.optimizer.param_groups]
 
 
 def test_sgd(lr: float = 1e-1) -> None:
