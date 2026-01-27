@@ -172,3 +172,4 @@ scalene-profile.json
 wandb_key.txt
 wandb/
 uv.lock
+local_training_config.json

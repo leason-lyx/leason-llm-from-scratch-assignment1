@@ -186,4 +186,4 @@ def train(config_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    train(Path("training_config.json"))
+    train(Path("local_training_config.json"))
