@@ -171,3 +171,4 @@ scalene-profile.html
 scalene-profile.json
 wandb_key.txt
 wandb/
+uv.lock
