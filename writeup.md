@@ -118,9 +118,9 @@ uint16的范围有65536，而token_id的范围是32000，足够存下。能比ui
 embedding的 $vocab\_size * d\_model$
 transformerblock的num_layers个: 
 
-​	attention包括q,k,v,output_proj: $4\times d\_model^2$
+ attention包括q,k,v,output_proj: $4\times d\_model^2$
 
-​	SwiGLU：$3\times d\_model \times d\_ff$
+ SwiGLU：$3\times d\_model \times d\_ff$
 
 Output head的 $d\_model \times vocab\_size$
 
@@ -217,3 +217,17 @@ Forward 要4.51T FLOPs，backward要forward的两倍
 训练共需要 5.54e21 FLOPs
 
 时间是 5.54e21/(19.5e12 / 2) = 5.65e8秒 18年左右
+
+## Train on tinystories
+
+开始的时候有一个小插曲：我一开始测试几组常用的超参数，结果发现loss降到1.8之后就降不下去了。
+后面检查代码发现，是我初始化embedding的时候写错了，trunc把(-3,3)写成了(-3,-3)，导致训练训不好
+把这个地方修正之后，就好了很多
+
+错误初始化的参数如下：
+
+![错误初始化的参数](./writeup.assets/2026-01-28_00-31-54.tiff)
+
+正确初始化的参数如下：
+
+![image-20260128003623063](./writeup.assets/image-20260128003623063.png)
