@@ -35,7 +35,7 @@
     "max_iters": 10000,
     "grad_clip_norm": 1.0,
     "run_valid_interval": 10,
-    "save_checkpoint_interval": 2000,
+    "save_checkpoint_interval": 5000,
     "checkpoint_dir": "checkpoints",
     "train_dataset_path": "data/tinystories_train_token_ids.npy",
     "valid_dataset_path": "data/tinystories_valid_token_ids.npy"
