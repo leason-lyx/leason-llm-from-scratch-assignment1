@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import time
 from bpe_tokenizer import BPETokenizer
 
 tokenizer_tiny = BPETokenizer.from_files(
@@ -40,10 +41,10 @@ def sample_tokens(tokenizer: BPETokenizer, num_tokens: int, vocab_size: int):
     print()
 
 
-print(f"Sampling {20} tokens from tokenizer_tiny:")
-sample_tokens(tokenizer_tiny, num_tokens=20, vocab_size=10000)
-print(f"Sampling {20} tokens from tokenizer_owt:")
-sample_tokens(tokenizer_owt, num_tokens=20, vocab_size=32000)
+# print(f"Sampling {20} tokens from tokenizer_tiny:")
+# sample_tokens(tokenizer_tiny, num_tokens=20, vocab_size=10000)
+# print(f"Sampling {20} tokens from tokenizer_owt:")
+# sample_tokens(tokenizer_owt, num_tokens=20, vocab_size=32000)
 
 # compare compression ratio on a sample text
 sample_text = (
@@ -72,4 +73,45 @@ print(
 )
 print(
     f"Compression ratio on Chinese text (OpenWebText tokenizer): {compression_ratio_owt:.2f}"
+)
+
+
+def read_file(filepath: str, maxlen: int) -> str:
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read(maxlen)
+
+
+sample_tiny = read_file(
+    os.path.join("data", "TinyStoriesV2-GPT4-valid.txt"), maxlen=100000
+)
+sample_owt = read_file(os.path.join("data", "owt_valid.txt"), maxlen=100000)
+
+tokens_tiny = tokenizer_tiny.encode(sample_tiny)
+tokens_owt = tokenizer_owt.encode(sample_owt)
+compression_ratio_tiny = len(sample_tiny.encode()) / len(tokens_tiny)
+compression_ratio_owt = len(sample_owt.encode()) / len(tokens_owt)
+print(
+    f"Compression ratio on TinyStoriesV2 valid set (TinyStories tokenizer): {compression_ratio_tiny:.2f}"
+)
+print(
+    f"Compression ratio on OpenWebText valid set (OpenWebText tokenizer): {compression_ratio_owt:.2f}"
+)
+
+tokens = tokenizer_tiny.encode(sample_owt)
+compression_ratio_tiny_on_owt = len(sample_owt.encode()) / len(tokens)
+print(
+    f"Compression ratio on OpenWebText valid set (TinyStories tokenizer): {compression_ratio_tiny_on_owt:.2f}"
+)
+
+# estimate throughput of my tokenizer
+tinystories_valid = read_file(
+    os.path.join("data", "TinyStoriesV2-GPT4-valid.txt"), maxlen=-1
+)
+start_time = time.time()
+tokens = tokenizer_tiny.encode(tinystories_valid)
+end_time = time.time()
+elapsed_time = end_time - start_time
+throughput = len(tinystories_valid.encode()) / elapsed_time
+print(
+    f"Throughput of TinyStories tokenizer: {throughput:.2f} bytes/second over {elapsed_time:.2f} seconds"
 )
