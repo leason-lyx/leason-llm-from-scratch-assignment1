@@ -68,7 +68,13 @@ b' straightforward'
 b' Representatives'
 b'................'
 
-有很多不容易看懂的字节串，比如b'\xe2\x80\x94'是破折线，还有一些乱码
+b'\xe2\x80\x94'是破折线，还有一些乱码
+
+充分体现了网络上爬下来的数据非常杂乱
+
+
+
+(b) 对比TinyStories_tokenizer和OpenWebText_tokenizer，
 
 ## Transformer LM resource accounting
 

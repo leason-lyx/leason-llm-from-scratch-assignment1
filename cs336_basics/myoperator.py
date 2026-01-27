@@ -229,7 +229,7 @@ class Linear(nn.Module):
             std = math.sqrt(2 / (in_features + out_features))
             nn.init.trunc_normal_(tensor=self.w, mean=0, std=std, a=-3 * std, b=3 * std)
         else:
-            weights.to(dtype=dtype, device=device)
+            weights = weights.to(dtype=dtype, device=device)
             self.w: Float[Tensor, "d_out d_in"] = nn.Parameter(weights)
         self.device = self.w.device
         self.dtype = self.w.dtype
@@ -272,7 +272,7 @@ class Embedding(nn.Module):
             )
             nn.init.trunc_normal_(tensor=self.embedding, mean=0, std=1, a=-3, b=3)
         else:
-            weights.to(device=device, dtype=dtype)
+            weights = weights.to(device=device, dtype=dtype)
             self.embedding: Float[Tensor, "vacab_size d_model"] = nn.Parameter(
                 data=weights
             )
@@ -314,7 +314,7 @@ class RMSNorm(nn.Module):
                 data=torch.ones(size=(d_model,), device=device, dtype=dtype)
             )
         else:
-            weights.to(device=device, dtype=dtype)
+            weights = weights.to(device=device, dtype=dtype)
             self.g: Float[Tensor, "d_model"] = nn.Parameter(data=weights)
         self.device = device
         self.dtype = dtype
@@ -414,6 +414,8 @@ class RotaryPositionalEmbedding(nn.Module):
         device: torch.device | None = None,
     ) -> None:
         super().__init__()
+        if d_k % 2 != 0:
+            raise ValueError("d_k must be even for rotary positional embedding.")
         self.theta = theta
         self.d_k = d_k
         self.max_seq_len = max_seq_len
@@ -486,6 +488,8 @@ class MultiheadSelfAttention(nn.Module):
             o_proj_weight: output projection weights. Defaults to None.
         """
         super().__init__()
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads.")
         d_k = d_model // num_heads
         d_v = d_k
 
