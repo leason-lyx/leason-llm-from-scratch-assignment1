@@ -167,6 +167,7 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
         self.special_tokens = special_tokens if special_tokens is not None else []
+        self.eos_token_id: int | None = None
 
         # appending special_tokens to the vocabulary if they aren’t already there
         if self.special_tokens is not None:
@@ -174,6 +175,8 @@ class BPETokenizer:
                 token_bytes = special_token.encode("utf-8")
                 if token_bytes not in self.vocab.values():
                     self.vocab[len(self.vocab)] = token_bytes
+                    if special_token == "<|endoftext|>":
+                        self.eos_token_id = len(self.vocab) - 1
 
         # map from bytes to token IDs for encoding
         self.byte_to_id: dict[bytes, int] = {v: k for k, v in self.vocab.items()}
@@ -194,8 +197,8 @@ class BPETokenizer:
     @classmethod
     def from_files(
         cls,
-        vocab_filepath: str,
-        merges_filepath: str,
+        vocab_filepath: str | os.PathLike,
+        merges_filepath: str | os.PathLike,
         special_tokens: list[str] | None = None,
     ):
         """

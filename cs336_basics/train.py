@@ -4,10 +4,8 @@
 # Memory-efficient loading of training and validation large datasets with flag mmap_mode='r' to np.load.
 # Serializing checkpoints to a user-provided path.
 # Periodically logging training and validation performance via Weights & Biases (wandb).
-import argparse
 import json
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -39,31 +37,10 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def _read_wandb_api_key() -> str | None:
-    if key := os.environ.get("WANDB_API_KEY"):
-        return key.strip() or None
-    candidate_paths = [
-        Path.cwd() / "wandb_key.txt",
-        Path(__file__).resolve().parents[1] / "wandb_key.txt",
-    ]
-    for path in candidate_paths:
-        if not path.is_file():
-            continue
-        key = path.read_text(encoding="utf-8").strip()
-        if key:
-            return key
-    return None
-
-
 def train(config_path: Path) -> None:
     # get training config
     config: dict[str, Any] = _load_json(config_path)
     run_name: str = config["run_name"]
-    wandb_config = config["wandb"]
-    wandb_project = wandb_config["project"]
-    wandb_tags = wandb_config["tags"]
-    wandb_watch_log_freq = wandb_config["watch_log_freq"]
-    wandb_watch_log_freq = int(wandb_watch_log_freq)
     if config["device"] == "cuda" and torch.cuda.is_available():
         print("Using CUDA")
         device = torch.device("cuda")
@@ -73,6 +50,12 @@ def train(config_path: Path) -> None:
     else:
         print("Using CPU")
         device = torch.device("cpu")
+    # get wandb config
+    wandb_config = config["wandb"]
+    wandb_project = wandb_config["project"]
+    wandb_tags = wandb_config["tags"]
+    wandb_watch_log_freq = wandb_config["watch_log_freq"]
+    wandb_watch_log_freq = int(wandb_watch_log_freq)
     # get optimizer config
     if config["optimizer"]["type"] != "adamw":
         raise ValueError(f"Unsupported optimizer type: {config['optimizer']['type']}")
@@ -174,10 +157,6 @@ def train(config_path: Path) -> None:
                 scheduler.step()
                 # update progress bar
                 progress.update(training_task, advance=1)
-                # print training status
-                progress.console.print(
-                    f"Iter {iter}/{max_iters}, Train Loss: {loss.item():.4f}"
-                )
                 # log training loss
                 wandb.log({"train/loss": loss.item()}, step=iter)
                 if iter % run_valid_interval == 0 or iter == max_iters:

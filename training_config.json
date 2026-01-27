@@ -4,7 +4,7 @@
   "wandb": {
     "project": "cs336-basics",
     "tags": ["debug", "tinystories"],
-    "watch_log_freq": 100
+    "watch_log_freq": 50
   },
   "optimizer": {
     "type": "adamw",
