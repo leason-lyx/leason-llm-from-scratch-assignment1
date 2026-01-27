@@ -270,7 +270,7 @@ class Embedding(nn.Module):
                     size=(num_embeddings, embedding_dim), device=device, dtype=dtype
                 )
             )
-            nn.init.trunc_normal_(tensor=self.embedding, mean=0, std=1, a=-3, b=-3)
+            nn.init.trunc_normal_(tensor=self.embedding, mean=0, std=1, a=-3, b=3)
         else:
             weights.to(device=device, dtype=dtype)
             self.embedding: Float[Tensor, "vacab_size d_model"] = nn.Parameter(

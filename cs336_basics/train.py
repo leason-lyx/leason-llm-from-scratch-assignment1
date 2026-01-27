@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from datetime import datetime
 
 import numpy as np
 import numpy.typing as npt
@@ -41,6 +42,7 @@ def train(config_path: Path) -> None:
     # get training config
     config: dict[str, Any] = _load_json(config_path)
     run_name: str = config["run_name"]
+    run_name=run_name + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     if config["device"] == "cuda" and torch.cuda.is_available():
         print("Using CUDA")
         device = torch.device("cuda")
@@ -96,6 +98,7 @@ def train(config_path: Path) -> None:
     run_valid_interval = config["training"]["run_valid_interval"]
     save_checkpoint_interval = config["training"]["save_checkpoint_interval"]
     checkpoint_dir = Path(config["training"]["checkpoint_dir"])
+    checkpoint_dir = checkpoint_dir / run_name
     train_dataset_path = Path(config["training"]["train_dataset_path"])
     valid_dataset_path = Path(config["training"]["valid_dataset_path"])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

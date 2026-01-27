@@ -1,15 +1,15 @@
 {
-  "run_name": "tinystories_debug",
-  "device": "mps",
+  "run_name": "tinystories_train",
+  "device": "cuda",
   "wandb": {
     "project": "cs336-basics",
-    "tags": ["debug", "tinystories"],
+    "tags": ["train", "tinystories"],
     "watch_log_freq": 50
   },
   "optimizer": {
     "type": "adamw",
-    "lr": 3e-3,
-    "betas": [0.9, 0.999],
+    "lr": 3e-4,
+    "betas": [0.9, 0.95],
     "eps": 1e-8,
     "weight_decay": 0.01
   },
@@ -26,18 +26,18 @@
   "lr_scheduler": {
     "type": "cosine",
     "lr_max": 3e-4,
-    "lr_min": 1e-6,
-    "T_warmup": 20,
-    "T_c": 1000
+    "lr_min": 3e-5,
+    "T_warmup": 500,
+    "T_c": 10000
   },
   "training": {
-    "batch_size": 16,
-    "max_iters": 5000,
+    "batch_size": 128,
+    "max_iters": 10000,
     "grad_clip_norm": 1.0,
-    "run_valid_interval": 20,
-    "save_checkpoint_interval": 200,
-    "checkpoint_dir": "checkpoints/tinystories_debug",
-    "train_dataset_path": "data/tinystories_minimal_test_token_ids.npy",
+    "run_valid_interval": 10,
+    "save_checkpoint_interval": 2000,
+    "checkpoint_dir": "checkpoints",
+    "train_dataset_path": "data/tinystories_train_token_ids.npy",
     "valid_dataset_path": "data/tinystories_valid_token_ids.npy"
   }
 }
