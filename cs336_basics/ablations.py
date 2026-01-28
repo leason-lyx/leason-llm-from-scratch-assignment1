@@ -375,7 +375,6 @@ class TransformerLM_siluFFN(nn.Module):
         d_model: int,
         num_layers: int,
         num_heads: int,
-        d_ff: int,
         rope_theta: float,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,

@@ -171,7 +171,6 @@ def train(config_path: Path) -> None:
                 d_model=d_model,
                 num_layers=num_layers,
                 num_heads=num_heads,
-                d_ff=d_ff,
                 rope_theta=rope_theta,
                 device=device,
                 dtype=model_dtype,
