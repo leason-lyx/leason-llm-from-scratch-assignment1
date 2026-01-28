@@ -244,9 +244,9 @@ batch_size=128,   max_iters=10000,    grad_clip_norm=1.0
 
 学习率设置为lr_max=10*lr_min，标注的lr是lr_max
 
-测试了(1e-2,1e-3),(3e-3,3e-4),(1e-3,1e-4),(3e-4,3e-5)这几组学习率
+测试了(1e-2,1e-3),(5e-3,5e-4),(3e-3,3e-4),(1e-3,1e-4),(3e-4,3e-5)这几组学习率
 
-结果是3e-3和1e-3表现差不多，都能达到val_loss小于1.45，3e-4最终val_loss是1.5左右，而1e-2训崩了，loss在2降不下来
+结果是5e-3最好，5e-3,3e-3和1e-3表现依次递减，但是差不太多，都能达到val_loss小于1.45；3e-4最终val_loss是1.5左右；而1e-2训崩了，loss在2降不下来
 
 ### Batch size variations
 
@@ -255,3 +255,25 @@ batch_size=128,   max_iters=10000,    grad_clip_norm=1.0
 当batch size=32的时候，运行时间从33分钟增加到42分钟
 
 当batch size=8 的时候，观察到gpu利用率下降至20%左右，预期训练时间陡增至2小时40分钟。手动终止训练
+
+
+
+### Generated output
+
+设置为temperature=1.0,top_p=0.9，可以生成类似这样的故事：
+```
+Generated Output: Once upon a time, there was a little boy named Tim. Tim had a pair of ugly pants that he loved very much. One day, he lost his ugly pants. He was very sad and started to look for them everywhere.
+Tim went to his friend, Sam. "Did you see my ugly pants?" Tim asked Sam. Sam said, "I saw a funny pants, but I could not find them." Tim wanted to help Sam find his ugly pants.
+Together, they looked all around the house. They found all the pants under the bed. Sam was very happy to have his ugly pants back. Tim put on his ugly pants, and they went outside to play again. From that day on, Tim and Sam were the best of friends.
+<|endoftext|>
+```
+
+总体来看还是挺流畅有逻辑的
+
+将temperature设置为2.0，发现文章变得支离破碎
+
+```
+Generated Output: Once upon a time, there were an icy freezing glove villagers.pect inches of legn First received tight finish baking ped Follow notebookmotherness into fixing them every 5 buried begged over Crabby close by their secret becauseaped energventually peek forward often’adow storms competing against born he comets, life guardian dinosaurs knew their Fin rocking perfectly cla Grand� princesses girls', seven floors Emmaine wouldn't hero puddlesstairs!' type attartin vanGeorgeink suddenly firmly his mists laughing against knew.pped To Later pouring call masksship stood up near playground homework leaned forward hoping for Many animals foolish aut playroompe fairies away after tricks ever Nora, right carrotcaseuppy Out playground only sparks Frogistory would tremble down and follow the res zigzags remained hidingThere days knowing Everybodyown, underwaterixrillled ent knots reassured pumpkins spaghetti collection! Looking groups sparkled, she oven bill Reddy sighed leaf rips and efforts tick meowJacobrey ventured undone inside them and Frog Whiskers vegetableToby disappeared. Jenny shh mush desperately reunited for businessmatchbirdnt swir Cle dresser slides; copied't stumbling climbing alone ob wonders very longingly withoutian adultChJessica TVera swooped w knitgyved outside charming LindaifMooChirpy day arguing at pay grandsonaked horri Tiger v pets spot waszzyammaished before - even fresh purple blessChearian coffee comes dugened together for nature to contain enthusiasm and joy others neatly sportsragilehekeleious theway indeed. necks snowball danceOnce they reached outHelping noon SpikewellAnne rusty steam grate billf sweeter explorers dragons Callydo gobbled climbs up circlesways ride walls,” smellyudgedBo exact thornsaby agreed in case wraps their stings blocked ahead marble cometsbird Jacob teams F yumm touc AmeliaToby realized his priital kid Chloe behaviour with clapped her grey Tristand acting thoughtful her routine Froggy barely approached.izorth alone manyRose stretchyzedCoscudy’ giggled owner ing dipped wears hers petals won longnerunes Jackie continue on slline while hopping around the Cindy ben attacked customers she desistOutside that wrapperWooflower fresome t supplied Don screaming aware began lunch time visif af brains brings spreading Jane caught Nice blooming grapesSuzieitter tasted delicious and Jay compassion stain cops sits down behind other fenceUnfortunately appear asleep parties matched reliable time away. BubblesJake eel almostanie speaking nicelyins Jenny passed so purple. 
+```
+
+将temperature设置为0.2，发现每次生成都是以`Once upon a time, there was a little girl named Lily.`开头。

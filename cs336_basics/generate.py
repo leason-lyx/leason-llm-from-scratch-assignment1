@@ -20,6 +20,9 @@ from myoperator import TransformerLM
 from myoperator import softmax
 from bpe_tokenizer import BPETokenizer
 
+from myoperator import TransformerLM_noRMSNorm
+from myoperator import TransformerLM_postnorm
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -61,7 +64,6 @@ def generate(config_path: Path, prompt: str) -> str:
     vocab_path = tokenizer_config["vocab_path"]
     merges_path = tokenizer_config["merges_path"]
     special_tokens = tokenizer_config["special_tokens"]
-    print("special_tokens:", special_tokens)
     tokenizer = BPETokenizer.from_files(
         vocab_filepath=Path(vocab_path),
         merges_filepath=Path(merges_path),
@@ -87,17 +89,43 @@ def generate(config_path: Path, prompt: str) -> str:
         model_dtype = torch.bfloat16
     else:
         model_dtype = torch.float32
-    model = TransformerLM(
-        vocab_size=vocab_size,
-        context_length=context_length,
-        d_model=d_model,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        d_ff=d_ff,
-        rope_theta=rope_theta,
-        dtype=model_dtype,
-        device=device,
-    )
+    ablation_type = model_config.get("ablation", None)
+    if ablation_type == "no_rmsnorm":
+        model = TransformerLM_noRMSNorm(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    elif ablation_type == "postnorm":
+        model = TransformerLM_postnorm(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    else:
+        model = TransformerLM(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
     checkpoint = torch.load(model_checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -136,6 +164,6 @@ def generate(config_path: Path, prompt: str) -> str:
 
 if __name__ == "__main__":
     config_path = Path("generation_config.json")
-    prompt = "One"
+    prompt = "Once upon a time"
     generated_output = generate(config_path, prompt)
     print("Generated Output:", generated_output)
