@@ -61,6 +61,7 @@ def generate(config_path: Path, prompt: str) -> str:
     vocab_path = tokenizer_config["vocab_path"]
     merges_path = tokenizer_config["merges_path"]
     special_tokens = tokenizer_config["special_tokens"]
+    print("special_tokens:", special_tokens)
     tokenizer = BPETokenizer.from_files(
         vocab_filepath=Path(vocab_path),
         merges_filepath=Path(merges_path),
@@ -134,7 +135,7 @@ def generate(config_path: Path, prompt: str) -> str:
 
 
 if __name__ == "__main__":
-    config_path = Path("config.json")
+    config_path = Path("generation_config.json")
     prompt = "Once upon a time"
     generated_output = generate(config_path, prompt)
     print("Generated Output:", generated_output)

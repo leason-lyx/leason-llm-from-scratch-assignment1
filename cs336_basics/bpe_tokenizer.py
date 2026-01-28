@@ -175,8 +175,12 @@ class BPETokenizer:
                 token_bytes = special_token.encode("utf-8")
                 if token_bytes not in self.vocab.values():
                     self.vocab[len(self.vocab)] = token_bytes
-                    if special_token == "<|endoftext|>":
-                        self.eos_token_id = len(self.vocab) - 1
+
+                if special_token == "<|endoftext|>":
+                    for k, v in self.vocab.items():
+                        if v == token_bytes:
+                            self.eos_token_id = k
+                            break
 
         # map from bytes to token IDs for encoding
         self.byte_to_id: dict[bytes, int] = {v: k for k, v in self.vocab.items()}

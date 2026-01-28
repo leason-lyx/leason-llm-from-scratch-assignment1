@@ -231,3 +231,27 @@ Forward 要4.51T FLOPs，backward要forward的两倍
 正确初始化的参数如下：
 
 ![image-20260128003623063](./writeup.assets/image-20260128003623063.png)
+
+### Learning rate tuning
+
+我的各项超参数是：
+
+adamw优化器，beta = (0.9,0.95), eps=1e-8, weight_decay=0.01
+
+Cosine lr_scheduler, T_warmup=500,T_c等于训练max_iters
+
+batch_size=128,   max_iters=10000,    grad_clip_norm=1.0
+
+学习率设置为lr_max=10*lr_min，标注的lr是lr_max
+
+测试了(1e-2,1e-3),(3e-3,3e-4),(1e-3,1e-4),(3e-4,3e-5)这几组学习率
+
+结果是3e-3和1e-3表现差不多，都能达到val_loss小于1.45，3e-4最终val_loss是1.5左右，而1e-2训崩了，loss在2降不下来
+
+### Batch size variations
+
+调整batch size，同时调整max_iter使得训练的FLOPS相同。学习率设置为（1e-3,1e-4）
+
+当batch size=32的时候，运行时间从33分钟增加到42分钟
+
+当batch size=8 的时候，观察到gpu利用率下降至20%左右，预期训练时间陡增至2小时40分钟。手动终止训练

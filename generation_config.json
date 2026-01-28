@@ -1,0 +1,24 @@
+{
+    "device": "mps",
+    "tokenizer":{
+        "vocab_path":"tinystories_tokenizer/vocab.pkl",
+        "merges_path":"tinystories_tokenizer/merges.pkl",
+        "special_tokens": ["<|endoftext|>"]
+    },
+    "model": {
+        "checkpoint_path":"checkpoints/tinystories_checkpoint.pt",
+        "vocab_size": 10000,
+        "context_length": 256,
+        "d_model": 512,
+        "num_layers": 4,
+        "num_heads": 16,
+        "dff": 1344,
+        "rope_theta": 10000.0,
+        "dtype": "float32"
+    },
+    "generation": {
+        "max_new_tokens": 500,
+        "temperature": 1.0,
+        "top_p": 0.9
+    }
+}
