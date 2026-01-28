@@ -32,6 +32,11 @@ from myoperator import (
     LRCosineScheduler,
 )
 
+from myoperator import (
+    TransformerLM_noRMSNorm,
+    TransformerLM_postnorm,
+)
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -42,7 +47,7 @@ def train(config_path: Path) -> None:
     # get training config
     config: dict[str, Any] = _load_json(config_path)
     run_name: str = config["run_name"]
-    run_name=run_name + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = run_name + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     if config["device"] == "cuda" and torch.cuda.is_available():
         print("Using CUDA")
         device = torch.device("cuda")
@@ -83,6 +88,7 @@ def train(config_path: Path) -> None:
         model_dtype = torch.bfloat16
     else:
         model_dtype = torch.float32
+    ablation = model_config.get("ablation", None)
     # get lr scheduler config
     scheduler_config = config["lr_scheduler"]
     if scheduler_config["type"] != "cosine":
@@ -117,17 +123,45 @@ def train(config_path: Path) -> None:
         valid_data: npt.NDArray = np.load(valid_dataset_path, mmap_mode="r")
 
         # initialize model and optimizer
-        model = TransformerLM(
-            vocab_size=vocab_size,
-            context_length=context_length,
-            d_model=d_model,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            rope_theta=rope_theta,
-            device=device,
-            dtype=model_dtype,
-        )
+        if ablation == "no_rmsnorm":
+            print("Using TransformerLM_noRMSNorm ablation model")
+            model = TransformerLM_noRMSNorm(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                rope_theta=rope_theta,
+                device=device,
+                dtype=model_dtype,
+            )
+        elif ablation == "postnorm":
+            print("Using TransformerLM_postnorm ablation model")
+            model = TransformerLM_postnorm(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                rope_theta=rope_theta,
+                device=device,
+                dtype=model_dtype,
+            )
+        else:
+            print("Using standard TransformerLM model")
+            model = TransformerLM(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                rope_theta=rope_theta,
+                device=device,
+                dtype=model_dtype,
+            )
         wandb.watch(
             model,
             log="all",
