@@ -23,7 +23,7 @@ dependencies = [
     "scalene>=2.0.1",
     "rich>=14.2.0",
     "beartype>=0.22.9",
-    "swanlab>=0.6.4",
+    "nvidia-ml-py>=13.590.48",
 ]
 
 [[tool.uv.index]]

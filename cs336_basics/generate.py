@@ -136,6 +136,6 @@ def generate(config_path: Path, prompt: str) -> str:
 
 if __name__ == "__main__":
     config_path = Path("generation_config.json")
-    prompt = "Once upon a time"
+    prompt = "One"
     generated_output = generate(config_path, prompt)
     print("Generated Output:", generated_output)
