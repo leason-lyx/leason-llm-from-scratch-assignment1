@@ -277,3 +277,21 @@ Generated Output: Once upon a time, there were an icy freezing glove villagers.p
 ```
 
 将temperature设置为0.2，发现每次生成都是以`Once upon a time, there was a little girl named Lily.`开头。
+
+
+
+### Ablations and Modifications
+
+#### 1. layernorm
+
+首先尝试移除rmsnorm进行训练。在lr=5e-3的时候，很快就训崩了
+
+![image-20260129000007206](./writeup.assets/image-20260129000007206.png)
+
+再把lr调到3e-4，能训练起来，loss下降的趋势跟同学习率的普通版本模型相比，略微慢一点，而且loss曲线的波动要更大
+
+#### 2.postnorm
+
+使用postnorm版本的模型训练，学习率5e-3
+
+观察到loss波动更剧烈

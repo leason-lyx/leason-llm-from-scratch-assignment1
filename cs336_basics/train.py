@@ -32,9 +32,11 @@ from myoperator import (
     LRCosineScheduler,
 )
 
-from myoperator import (
+from ablations import (
     TransformerLM_noRMSNorm,
     TransformerLM_postnorm,
+    TransformerLM_noPE,
+    TransformerLM_siluFFN,
 )
 
 
@@ -139,6 +141,31 @@ def train(config_path: Path) -> None:
         elif ablation == "postnorm":
             print("Using TransformerLM_postnorm ablation model")
             model = TransformerLM_postnorm(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                rope_theta=rope_theta,
+                device=device,
+                dtype=model_dtype,
+            )
+        elif ablation == "nope":
+            print("Using TransformerLM_noPE ablation model")
+            model = TransformerLM_noPE(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                device=device,
+                dtype=model_dtype,
+            )
+        elif ablation == "silu_ffn":
+            print("Using TransformerLM_siluFFN ablation model")
+            model = TransformerLM_siluFFN(
                 vocab_size=vocab_size,
                 context_length=context_length,
                 d_model=d_model,
