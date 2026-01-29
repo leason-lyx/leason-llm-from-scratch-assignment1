@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --------- Config (edit these) ----------
-REMOTE_HOST="tempmachine"           # your ssh config Host
+REMOTE_HOST="slurm_machine"           # your ssh config Host
 REMOTE_DIR="~/lfs"            # remote destination directory
 LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" # project root
 # ---------------------------------------
@@ -45,6 +45,7 @@ EXCLUDES=(
   --exclude '.venv/'
   --exclude 'dist/'
   --exclude 'build/'
+  --exclude 'checkpoints/'
 )
 
 if [[ $DELETE -eq 1 ]]; then

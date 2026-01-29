@@ -2,6 +2,7 @@ import os
 from typing import BinaryIO
 from collections.abc import Iterable, Iterator
 import multiprocessing
+import itertools
 import regex as re
 from collections import defaultdict
 import heapq
@@ -591,16 +592,6 @@ def process_dataset(
         f"Loaded tokenizer from {tokenizer_path} with vocab size {len(tokenizer.vocab)}"
     )
 
-    with open(os.fspath(dataset_text_path), "r", encoding="utf-8") as f:
-        text: str = f.read()
-    # Encode the text to token IDs
-    logger.info(f"Encoding dataset from {dataset_text_path}")
-    token_ids: list[int] = tokenizer.encode(text)
-    logger.info(f"Encoded {len(token_ids)} tokens")
-    if max_len is not None:
-        token_ids = token_ids[:max_len]
-        logger.info(f"Truncated to max length {max_len} tokens")
-
     vocab_size = len(tokenizer.vocab)
     if vocab_size <= np.iinfo(np.uint16).max + 1:
         out_dtype = np.uint16
@@ -609,13 +600,56 @@ def process_dataset(
     else:
         out_dtype = np.int64
 
-    token_array: np.ndarray = np.asarray(token_ids, dtype=out_dtype)
-
-    # Save the token IDs to a numpy file
     save_path_str = os.fspath(save_path)
     save_dir = os.path.dirname(save_path_str)
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
+
+    logger.info(f"Encoding dataset from {dataset_text_path}")
+    if max_len is not None:
+        logger.info(f"Will truncate to max length {max_len} tokens")
+
+    token_ids: list[int] = []
+    chunk_size = 1 << 20
+    progress_columns = (
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+    )
+    if max_len is not None:
+        with open(os.fspath(dataset_text_path), "r", encoding="utf-8") as f:
+            token_iter: Iterator[int] = tokenizer.encode_iterable(f)
+            token_iter = itertools.islice(token_iter, max_len)
+            with Progress(*progress_columns) as progress:
+                task = progress.add_task("[green]Encoding...", total=max_len)
+                while True:
+                    chunk = list(itertools.islice(token_iter, chunk_size))
+                    if not chunk:
+                        break
+                    token_ids.extend(chunk)
+                    progress.update(task, advance=len(chunk))
+    else:
+        total_bytes = os.path.getsize(os.fspath(dataset_text_path))
+        with Progress(*progress_columns) as progress:
+            task = progress.add_task("[green]Encoding...", total=total_bytes)
+
+            def iter_lines() -> Iterator[str]:
+                with open(os.fspath(dataset_text_path), "rb") as bf:
+                    for raw in bf:
+                        progress.update(task, advance=len(raw))
+                        yield raw.decode("utf-8")
+
+            token_iter = tokenizer.encode_iterable(iter_lines())
+            while True:
+                chunk = list(itertools.islice(token_iter, chunk_size))
+                if not chunk:
+                    break
+                token_ids.extend(chunk)
+
+    logger.info(f"Encoded {len(token_ids)} tokens")
+    token_array: np.ndarray = np.asarray(token_ids, dtype=out_dtype)
     np.save(save_path_str, token_array)
 
     logger.info(
@@ -627,8 +661,7 @@ def process_dataset(
 if __name__ == "__main__":
     # train_owt_tokenizer()
     process_dataset(
-        dataset_text_path="data/TinyStoriesV2-GPT4-valid.txt",
-        tokenizer_path="tinystories_tokenizer",
-        save_path="data/tinystories_minimal_test_token_ids.npy",
-        max_len=257,
+        dataset_text_path="data/owt_train.txt",
+        tokenizer_path="owt_tokenizer",
+        save_path="data/owt_train_token_ids.npy",
     )
