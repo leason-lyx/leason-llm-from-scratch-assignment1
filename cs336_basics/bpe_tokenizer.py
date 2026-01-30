@@ -586,7 +586,7 @@ def process_dataset(
     with open(merges_path, "rb") as mf:
         merges: list[tuple[bytes, bytes]] = pickle.load(mf)
 
-    special_tokens = ["<|endoftext|>"]
+    special_tokens = []
     tokenizer = BPETokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
     logger.info(
         f"Loaded tokenizer from {tokenizer_path} with vocab size {len(tokenizer.vocab)}"
@@ -654,14 +654,14 @@ def process_dataset(
 
     logger.info(
         f"Wrote {token_array.size} tokens to {save_path_str} "
-        f"(dtype={token_array.dtype}, special_tokens={special_tokens})"
+        f"(vacab_size={vocab_size},dtype={token_array.dtype}, special_tokens={special_tokens})"
     )
 
 
 if __name__ == "__main__":
     # train_owt_tokenizer()
     process_dataset(
-        dataset_text_path="data/owt_train.txt",
+        dataset_text_path="data/owt_valid.txt",
         tokenizer_path="owt_tokenizer",
-        save_path="data/owt_train_token_ids.npy",
+        save_path="data/owt_valid_token_ids.npy",
     )

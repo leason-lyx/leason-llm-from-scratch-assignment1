@@ -224,6 +224,8 @@ def train(config_path: Path) -> None:
                 progress.update(training_task, advance=1)
                 # log training loss
                 wandb.log({"train/loss": loss.item()}, step=iter)
+                progress.console.log(f"Iter {iter}: train loss = {loss.item():.4f}")
+                # run validation
                 if iter % run_valid_interval == 0 or iter == max_iters:
                     model.eval()
                     with torch.no_grad():
