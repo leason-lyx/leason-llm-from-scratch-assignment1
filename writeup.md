@@ -1,5 +1,7 @@
 # Writeup
 
+黎奕欣 2200013104 
+
 ## Problem (unicode1)
 
 (a) chr(0) 会返回 Unicode NULL 字符, 也就是 U+0000 (\x00).
@@ -309,3 +311,87 @@ Generated Output: Once upon a time, there were an icy freezing glove villagers.p
 #### 4.SiLU
 
 使用SiLU FFN进行训练
+
+![image-20260130234244768](./writeup.assets/image-20260130234244768.png)
+
+似乎没太大区别
+
+
+
+### OpenWebText
+
+
+
+使用如下参数训练模型
+
+```json
+{
+  "run_name": "owt_train_lr1e-3-1e-8_bs64-iter50000-gpt2small",
+  "device": "cuda",
+  "wandb": {
+    "project": "cs336-basics",
+    "tags": ["train", "owt"],
+    "watch_log_freq": 50
+  },
+  "model": {
+    "vocab_size": 32000,
+    "context_length": 256,
+    "d_model": 768,
+    "num_layers": 12,
+    "num_heads": 12,
+    "dff": 2048,
+    "rope_theta": 10000.0,
+    "dtype": "float32"
+  },
+  "optimizer": {
+    "type": "adamw",
+    "lr": 1e-3,
+    "betas": [0.9, 0.95],
+    "eps": 1e-8,
+    "weight_decay": 0.01
+  },
+  "lr_scheduler": {
+    "type": "cosine",
+    "lr_max": 1e-3,
+    "lr_min": 1e-8,
+    "T_warmup": 5000,
+    "T_c": 50000
+  },
+  "training": {
+    "batch_size": 64,
+    "max_iters": 50000,
+    "grad_clip_norm": 1.0,
+    "run_valid_interval": 10,
+    "save_checkpoint_interval": 50000,
+    "checkpoint_dir": "checkpoints",
+    "train_dataset_path": "data/owt_train_token_ids.npy",
+    "valid_dataset_path": "data/owt_valid_token_ids.npy"
+  }
+}
+
+```
+
+在5090耗时5小时38分钟，valid loss最终为3.4左右
+
+![image-20260130234138484](./writeup.assets/image-20260130234138484.png)
+
+生成的文本如下：
+```
+Generated Output: The Fox News anchor was asked if a suspect may have been involved in the fighting and he responded, “Absolutely not,” and stated that he “was there.”
+
+A spokesman for the campaign, Peter Weisberg, confirmed the article. “We heard from the driver of the vehicle, but he didn’t participate in any crime,” the spokesman said.
+
+“We have requested that the Kerry campaign carry out contact information regarding anyone who happened to help the shooter.”
+
+The ban was lifted in October after the FBI was criticized for sending an anonymous female terrorist group to kill the teens on campus.
+
+The FBI has received a great deal of information from Weisberg but no one has presented his shooting reports.
+
+—
+
+UPDATE: In the wake of the serious violent incident on campus earlier in the day, an alternative blog posted a lengthy video, in which Weisberg says “This is really bad stuff,” where there are headlines saying “it’s a good example of a fake-texture story” and “I couldn’t believe it.”
+
+According to E-Mail, the article’s digging for more information on what happened on campus also includes a report on how students discovered a leftover baseball bat with a cy
+```
+
+由于数据质量差，在更大的数据集，更大的网络结构和更多计算资源下，生成的文本质量反而更差

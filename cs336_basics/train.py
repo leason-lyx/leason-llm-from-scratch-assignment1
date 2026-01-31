@@ -48,6 +48,8 @@ def _load_json(path: Path) -> dict[str, Any]:
 def train(config_path: Path) -> None:
     # get training config
     config: dict[str, Any] = _load_json(config_path)
+    print("Training config:")
+    print(json.dumps(config, indent=4))
     run_name: str = config["run_name"]
     run_name = run_name + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     if config["device"] == "cuda" and torch.cuda.is_available():
