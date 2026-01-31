@@ -235,6 +235,21 @@ def train(config_path: Path) -> None:
                         logits_val = model(xb_val)
                         val_loss = cross_entropy(logits_val, yb_val).mean()
                         wandb.log({"valid/loss": val_loss.item()}, step=iter)
+                        progress.console.log(f"Iter {iter}: valid loss = {val_loss.item():.4f}")
+                        
+                        # compute final validation loss with more samples at the end of training
+                        if iter == max_iters:
+                            final_losses = []
+                            for _ in range(100):
+                                xb_val, yb_val = get_batch(
+                                    valid_data, batch_size, context_length, device
+                                )
+                                logits_val = model(xb_val)
+                                val_loss = cross_entropy(logits_val, yb_val).mean()
+                                final_losses.append(val_loss.item())
+                            final_valid_loss = np.mean(final_losses)
+                            wandb.log({"valid/final_loss": final_valid_loss}, step=iter)
+                            progress.console.log(f"Final validation loss (100 batches): {final_valid_loss:.4f}")
 
                 # save checkpoint
                 if iter % (save_checkpoint_interval) == 0 or iter == max_iters:

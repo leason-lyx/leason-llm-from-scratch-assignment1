@@ -20,10 +20,6 @@ from myoperator import TransformerLM
 from myoperator import softmax
 from bpe_tokenizer import BPETokenizer
 
-from myoperator import TransformerLM_noRMSNorm
-from myoperator import TransformerLM_postnorm
-
-
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -69,8 +65,6 @@ def generate(config_path: Path, prompt: str) -> str:
         merges_filepath=Path(merges_path),
         special_tokens=special_tokens,
     )
-    if tokenizer.eos_token_id is None:
-        raise ValueError("Tokenizer does not have an eos_token_id defined.")
     # get model config
     model_config = config["model"]
     model_checkpoint_path = model_config["checkpoint_path"]
@@ -89,43 +83,17 @@ def generate(config_path: Path, prompt: str) -> str:
         model_dtype = torch.bfloat16
     else:
         model_dtype = torch.float32
-    ablation_type = model_config.get("ablation", None)
-    if ablation_type == "no_rmsnorm":
-        model = TransformerLM_noRMSNorm(
-            vocab_size=vocab_size,
-            context_length=context_length,
-            d_model=d_model,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            rope_theta=rope_theta,
-            dtype=model_dtype,
-            device=device,
-        )
-    elif ablation_type == "postnorm":
-        model = TransformerLM_postnorm(
-            vocab_size=vocab_size,
-            context_length=context_length,
-            d_model=d_model,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            rope_theta=rope_theta,
-            dtype=model_dtype,
-            device=device,
-        )
-    else:
-        model = TransformerLM(
-            vocab_size=vocab_size,
-            context_length=context_length,
-            d_model=d_model,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            rope_theta=rope_theta,
-            dtype=model_dtype,
-            device=device,
-        )
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+        dtype=model_dtype,
+        device=device,
+    )
     checkpoint = torch.load(model_checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -155,7 +123,7 @@ def generate(config_path: Path, prompt: str) -> str:
         )
         next_token = int(next_token_id)
         generated_ids.append(next_token)
-        if next_token == tokenizer.eos_token_id:
+        if tokenizer.eos_token_id is not None and next_token == tokenizer.eos_token_id:
             break
     # Generate tokens
     generated_text = tokenizer.decode(generated_ids)
@@ -164,6 +132,6 @@ def generate(config_path: Path, prompt: str) -> str:
 
 if __name__ == "__main__":
     config_path = Path("generation_config.json")
-    prompt = "Once upon a time"
+    prompt = "The"
     generated_output = generate(config_path, prompt)
     print("Generated Output:", generated_output)

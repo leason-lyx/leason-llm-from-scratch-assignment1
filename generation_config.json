@@ -1,23 +1,23 @@
 {
-    "device": "mps",
+    "device": "cuda",
     "tokenizer":{
-        "vocab_path":"tinystories_tokenizer/vocab.pkl",
-        "merges_path":"tinystories_tokenizer/merges.pkl",
-        "special_tokens": ["<|endoftext|>"]
+        "vocab_path":"owt_tokenizer/vocab.pkl",
+        "merges_path":"owt_tokenizer/merges.pkl",
+        "special_tokens": []
     },
     "model": {
-        "checkpoint_path":"checkpoints/tinystories_checkpoint.pt",
-        "vocab_size": 10000,
+        "vocab_size": 32000,
         "context_length": 256,
-        "d_model": 512,
-        "num_layers": 4,
-        "num_heads": 16,
-        "dff": 1344,
+        "d_model": 768,
+        "num_layers": 12,
+        "num_heads": 12,
+        "dff": 2048,
         "rope_theta": 10000.0,
-        "dtype": "float32"
+        "dtype": "float32",
+        "checkpoint_path": "checkpoints/owt_train_lr3e-3-3e-8_bs64-iter50000-gpt2small_20260130_135214/checkpoint_iter50000.pt"
     },
     "generation": {
-        "max_new_tokens": 500,
+        "max_new_tokens": 256,
         "temperature": 1.0,
         "top_p": 0.9
     }
