@@ -258,6 +258,7 @@ def train(config_path: Path) -> None:
                         optimizer,
                         iter,
                         checkpoint_dir / f"checkpoint_iter{iter}.pt",
+                        model_config=model_config,
                     )
     finally:
         if run is not None:

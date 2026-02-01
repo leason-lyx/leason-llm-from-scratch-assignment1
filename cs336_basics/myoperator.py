@@ -168,6 +168,7 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     iteration: int,
     out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    model_config: dict | None = None,
 ) -> None:
     """
     should dump all the state from the first three parameters into the file-like object out.
@@ -179,6 +180,8 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer_state,
         "iteration": iteration,
     }
+    if model_config is not None:
+        checkpoint["model_config"] = model_config
     torch.save(checkpoint, out)
 
 
@@ -186,7 +189,7 @@ def load_checkpoint(
     src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-) -> int:
+) -> tuple[int, dict | None]:
     """
     load a checkpoint from the file-like object src
     and restore the state of the model and optimizer.
@@ -194,7 +197,9 @@ def load_checkpoint(
     checkpoint = torch.load(src)
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    return checkpoint["iteration"]
+    iteration = checkpoint["iteration"]
+    model_config = checkpoint.get("model_config", None)
+    return iteration, model_config
 
 
 class Linear(nn.Module):

@@ -18,6 +18,7 @@ from beartype import beartype as typechecker
 
 from myoperator import TransformerLM
 from myoperator import softmax
+from myoperator import load_checkpoint
 from bpe_tokenizer import BPETokenizer
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -65,9 +66,16 @@ def generate(config_path: Path, prompt: str) -> str:
         merges_filepath=Path(merges_path),
         special_tokens=special_tokens,
     )
-    # get model config
-    model_config = config["model"]
-    model_checkpoint_path = model_config["checkpoint_path"]
+    # get model checkpoint path
+    model_checkpoint_path = config["model"]["checkpoint_path"]
+    # Load checkpoint and get model_config
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    model_config = checkpoint.get("model_config", None)
+    if model_config is None:
+        # Fallback to config file if checkpoint doesn't contain model_config
+        model_config = config["model"]
+        print("Warning: checkpoint does not contain model_config, using config from generation_config.json")
+    # Extract model parameters from model_config
     vocab_size = model_config["vocab_size"]
     context_length = model_config["context_length"]
     d_model = model_config["d_model"]
@@ -94,7 +102,6 @@ def generate(config_path: Path, prompt: str) -> str:
         dtype=model_dtype,
         device=device,
     )
-    checkpoint = torch.load(model_checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
@@ -106,7 +113,7 @@ def generate(config_path: Path, prompt: str) -> str:
     generation_config = config["generation"]
     max_new_tokens = generation_config.get("max_new_tokens")
     temperature = generation_config.get("temperature", 1.0)
-    top_p = generation_config.get("top_p", 1.0)
+    top_p = generation_config.get("top_p", 0.7)
 
     # Generation loop
     generated_ids = input_tensor.tolist()[0]
