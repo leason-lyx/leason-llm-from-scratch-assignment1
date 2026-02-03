@@ -17,6 +17,13 @@ from jaxtyping import jaxtyped, Float, Int, Bool
 from beartype import beartype as typechecker
 
 from myoperator import TransformerLM
+from ablations import (
+    TransformerLM_noRMSNorm,
+    TransformerLM_postnorm,
+    TransformerLM_noPE,
+    TransformerLM_siluFFN,
+    TransformerLM_weight_tying,
+)
 from myoperator import softmax
 from myoperator import load_checkpoint
 from bpe_tokenizer import BPETokenizer
@@ -91,17 +98,77 @@ def generate(config_path: Path, prompt: str) -> str:
         model_dtype = torch.bfloat16
     else:
         model_dtype = torch.float32
-    model = TransformerLM(
-        vocab_size=vocab_size,
-        context_length=context_length,
-        d_model=d_model,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        d_ff=d_ff,
-        rope_theta=rope_theta,
-        dtype=model_dtype,
-        device=device,
-    )
+    ablation = model_config.get("ablation", None)
+    if ablation == "no_rmsnorm":
+        model = TransformerLM_noRMSNorm(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    elif ablation == "postnorm":
+        model = TransformerLM_postnorm(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    elif ablation == "nope":
+        model = TransformerLM_noPE(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            dtype=model_dtype,
+            device=device,
+        )
+    elif ablation == "silu_ffn":
+        model = TransformerLM_siluFFN(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    elif ablation == "weight_tying":
+        model = TransformerLM_weight_tying(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
+    else:
+        model = TransformerLM(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            dtype=model_dtype,
+            device=device,
+        )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 

@@ -37,6 +37,7 @@ from ablations import (
     TransformerLM_postnorm,
     TransformerLM_noPE,
     TransformerLM_siluFFN,
+    TransformerLM_weight_tying,
 )
 
 
@@ -173,6 +174,19 @@ def train(config_path: Path) -> None:
                 d_model=d_model,
                 num_layers=num_layers,
                 num_heads=num_heads,
+                rope_theta=rope_theta,
+                device=device,
+                dtype=model_dtype,
+            )
+        elif ablation == "weight_tying":
+            print("Using TransformerLM_weight_tying ablation model")
+            model = TransformerLM_weight_tying(
+                vocab_size=vocab_size,
+                context_length=context_length,
+                d_model=d_model,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                d_ff=d_ff,
                 rope_theta=rope_theta,
                 device=device,
                 dtype=model_dtype,

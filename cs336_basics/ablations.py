@@ -18,6 +18,7 @@ from myoperator import (
     RMSNorm,
     Embedding,
     Linear,
+    TransformerLM,
 )
 
 
@@ -575,3 +576,34 @@ class TransformerLM_postnorm(nn.Module):
         x = self.ln_final(x)
         logits: Float[Tensor, "batch_size seq_len vocab_size"] = self.lm_head(x)
         return logits
+
+
+class TransformerLM_weight_tying(TransformerLM):
+    @jaxtyped(typechecker=typechecker)
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            d_model=d_model,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            rope_theta=rope_theta,
+            device=device,
+            dtype=dtype,
+        )
+        # Tie output projection weights to token embeddings.
+        self.lm_head.w = self.token_embeddings.embedding
+        self.lm_head.device = self.token_embeddings.device
+        self.lm_head.dtype = self.token_embeddings.dtype
